@@ -1,0 +1,1 @@
+# aliyun-pairec-config-java-sdk
