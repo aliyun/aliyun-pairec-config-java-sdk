@@ -1,19 +1,3 @@
-# aliyun-pairec-config-java-sdk
-
-Java sdk for PA-REC config server. Aliyun product [link](https://pairec.console.aliyun.com/v2).
-
-## Installation
-```
-<dependency>
-  <groupId>com.aliyun.openservices.aiservice</groupId>
-  <artifactId>pairec-sdk</artifactId>
-  <version>1.0.0</version>
-</dependency>
-```
-
-## Usage
-
-```java
 package com.aliyun.openservices.pairec;
 
 import com.aliyun.openservices.pairec.api.ApiClient;
@@ -21,6 +5,8 @@ import com.aliyun.openservices.pairec.api.Configuration;
 import com.aliyun.openservices.pairec.common.Constants;
 import com.aliyun.openservices.pairec.model.ExperimentContext;
 import com.aliyun.openservices.pairec.model.ExperimentResult;
+
+import java.util.Map;
 
 public class ExperimentTest {
     static ExperimentClient experimentClient;
@@ -59,9 +45,12 @@ public class ExperimentTest {
         // get experiment param value by pecific layer name
         System.out.println(experimentResult.getLayerParams("recall").getString("rank_version", "not exist"));
         System.out.println(experimentResult.getLayerParams("rank").getString("version", "not exist"));
+        System.out.println(experimentResult.getExperimentParams().getAllParams().size());
+
+        for(Map.Entry<String, Object> entry : experimentResult.getExperimentParams().getAllParams().entrySet()) {
+            System.out.println("key:" + entry.getKey() + "\tvalue=" + entry.getValue());
+        }
 
 
     }
 }
-
-```
