@@ -9,6 +9,9 @@ import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import java.util.HashMap;
+import java.util.Map;
+
 @Ignore
 public class ExperimentClientTest {
     ExperimentClient experimentClient;
@@ -42,8 +45,12 @@ public class ExperimentClientTest {
     public void matchTest() throws Exception {
         experimentClient.init();
         ExperimentContext experimentContext = new ExperimentContext();
-        experimentContext.setUid("103441638");
+        experimentContext.setUid("103441639");
+        //experimentContext.setUid("");
         experimentContext.setRequestId("pvid");
+        Map<String, Object> filters = new HashMap<>();
+        filters.put("country", "new1");
+        experimentContext.setFilterParams(filters);
 
         ExperimentResult experimentResult = experimentClient.matchExperiment("home_feed", experimentContext);
 
