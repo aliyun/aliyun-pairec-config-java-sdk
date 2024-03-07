@@ -45,11 +45,11 @@ public class ExperimentClientTest {
     public void matchTest() throws Exception {
         experimentClient.init();
         ExperimentContext experimentContext = new ExperimentContext();
-        experimentContext.setUid("103441639");
+        experimentContext.setUid("1034416392");
         //experimentContext.setUid("");
         experimentContext.setRequestId("pvid");
         Map<String, Object> filters = new HashMap<>();
-        filters.put("country", "new1");
+        filters.put("country", "new12");
         experimentContext.setFilterParams(filters);
 
         ExperimentResult experimentResult = experimentClient.matchExperiment("home_feed", experimentContext);
@@ -63,6 +63,7 @@ public class ExperimentClientTest {
         System.out.println(experimentResult.getExperimentParams().getString("version", "not exist"));
         System.out.println(experimentResult.getExperimentParams().getString("recall", "not exist"));
         System.out.println(experimentResult.getExperimentParams().getDouble("recall_d", 0.0));
+        System.out.println(experimentResult.getExperimentParams().getString("crowd", "not exist"));
 
     }
 

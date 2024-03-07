@@ -1,5 +1,6 @@
 package com.aliyun.openservices.pairec.model;
 
+import com.aliyun.tea.utils.StringUtils;
 import com.google.gson.annotations.SerializedName;
 
 import java.util.ArrayList;
@@ -172,5 +173,26 @@ public class Layer {
 
     public List<ExperimentGroup> getExperimentGroupList() {
         return experimentGroupList;
+    }
+
+    public ExperimentGroup findMatchExperimentGroup( ExperimentContext experimentContext)  {
+
+        for (ExperimentGroup experimentGroup : this.experimentGroupList) {
+            if (!StringUtils.isEmpty(experimentGroup.getFilter()) || (experimentGroup.getCrowdId() != null && experimentGroup.getCrowdId() > 0)) {
+                if (experimentGroup.match(experimentContext)) {
+                   return  experimentGroup;
+                }
+            }
+        }
+
+        for (ExperimentGroup experimentGroup : this.experimentGroupList) {
+            if (StringUtils.isEmpty(experimentGroup.getFilter()) && (experimentGroup.getCrowdId() == null  ||  experimentGroup.getCrowdUsers().size() == 0)) {
+                if (experimentGroup.match(experimentContext)) {
+                    return  experimentGroup;
+                }
+            }
+        }
+
+        return null;
     }
 }
