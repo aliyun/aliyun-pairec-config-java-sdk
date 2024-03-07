@@ -7,7 +7,7 @@ Java sdk for PA-REC config server. Aliyun product [link](https://pairec.console.
 <dependency>
   <groupId>com.aliyun.openservices.aiservice</groupId>
   <artifactId>pairec-sdk</artifactId>
-  <version>1.0.1</version>
+  <version>1.0.2</version>
 </dependency>
 ```
 
@@ -65,3 +65,6 @@ public class ExperimentTest {
 }
 
 ```
+## 版本说明
+1.0.2 (2024-03-07)
+* 优先匹配带有过滤条件或者指定人群的实验组
