@@ -217,66 +217,66 @@ public class ExperimentClient {
             experimentResult.setLayerList(matchExperimentRoom.getLayerList());
 
             for (Layer layer : matchExperimentRoom.getLayerList()) {
-                for (ExperimentGroup experimentGroup : layer.getExperimentGroupList()) {
-                    if (experimentGroup.match(experimentContext)) {
-                        experimentResult.addMatchExperimentGroup(layer.getLayerName(), experimentGroup);
+                ExperimentGroup experimentGroup = layer.findMatchExperimentGroup(experimentContext);
 
-                        Experiment defaultExperiment = null;
-                        Experiment matchExperiment = null;
+                if (experimentGroup != null) {
+                    experimentResult.addMatchExperimentGroup(layer.getLayerName(), experimentGroup);
 
+                    Experiment defaultExperiment = null;
+                    Experiment matchExperiment = null;
+
+                    for (Experiment experiment : experimentGroup.getExperimentList()) {
+                        if (experiment.getType() == Constants.Experiment_Type_Default) {
+                            defaultExperiment = experiment;
+                        }
+                    }
+
+                    // find match experiment
+                    if (null == matchExperiment) {
+                        // first find debug user experiment
                         for (Experiment experiment : experimentGroup.getExperimentList()) {
-                            if (experiment.getType() == Constants.Experiment_Type_Default) {
-                                defaultExperiment = experiment;
+                            if (experiment.getType() != Constants.Experiment_Type_Default && experiment.matchDebugUser(experimentContext)) {
+                                matchExperiment = experiment;
+                                logger.debug("match experiment debug users uid:{}", experimentContext.getUid());
+                                break;
                             }
                         }
 
-                        // find match experiment
                         if (null == matchExperiment) {
-                            // first find debug user experiment
+                            StringBuilder hashKey = new StringBuilder(experimentContext.getUid());
+                            hashKey.append("_EXPROOM").append(experimentGroup.getExpRoomId())
+                                    .append("_LAYER").append(experimentGroup.getLayerId())
+                                    .append("_EXPGROUP").append(experimentGroup.getExpGroupId());
+
+                            String hashValue = hashValue(hashKey.toString());
+                            logger.debug("match experiment hash key:{}, value:{}", hashKey, hashValue);
+                            experimentContext.setExperimentHashStr(hashValue);
+
                             for (Experiment experiment : experimentGroup.getExperimentList()) {
-                                if (experiment.getType() != Constants.Experiment_Type_Default && experiment.matchDebugUser(experimentContext)) {
+                                if (experiment.getType() != Constants.Experiment_Type_Default && experiment.match(experimentContext)) {
                                     matchExperiment = experiment;
-                                    logger.debug("match experiment debug users uid:{}", experimentContext.getUid());
                                     break;
                                 }
+
                             }
+                        }
+                    }
 
-                            if (null == matchExperiment) {
-                                StringBuilder hashKey = new StringBuilder(experimentContext.getUid());
-                                hashKey.append("_EXPROOM").append(experimentGroup.getExpRoomId())
-                                        .append("_LAYER").append(experimentGroup.getLayerId())
-                                        .append("_EXPGROUP").append(experimentGroup.getExpGroupId());
-
-                                String hashValue = hashValue(hashKey.toString());
-                                logger.debug("match experiment hash key:{}, value:{}", hashKey, hashValue);
-                                experimentContext.setExperimentHashStr(hashValue);
-
-                                for (Experiment experiment : experimentGroup.getExperimentList()) {
-                                    if (experiment.getType() != Constants.Experiment_Type_Default && experiment.match(experimentContext)) {
-                                        matchExperiment = experiment;
-                                        break;
-                                    }
-
+                    if (null == matchExperiment) {
+                        // if defaultExperiment not found ,set baseExperiment is  defaultExperiment
+                        if (null == defaultExperiment) {
+                            for (Experiment experiment : experimentGroup.getExperimentList()) {
+                                if (experiment.getType() == Constants.Experiment_Type_Base) {
+                                    defaultExperiment = experiment.cloneExperiment();
+                                    defaultExperiment.setType(Constants.Experiment_Type_Default);
                                 }
                             }
                         }
+                        matchExperiment = defaultExperiment;
+                    }
 
-                        if (null == matchExperiment) {
-                            // if defaultExperiment not found ,set baseExperiment is  defaultExperiment
-                            if (null == defaultExperiment) {
-                                for (Experiment experiment : experimentGroup.getExperimentList()) {
-                                    if (experiment.getType() == Constants.Experiment_Type_Base) {
-                                        defaultExperiment = experiment.cloneExperiment();
-                                        defaultExperiment.setType(Constants.Experiment_Type_Default);
-                                    }
-                                }
-                            }
-                            matchExperiment = defaultExperiment;
-                        }
-
-                        if (null != matchExperiment) {
-                            experimentResult.addMatchExperiment(layer.getLayerName(), matchExperiment);
-                        }
+                    if (null != matchExperiment) {
+                        experimentResult.addMatchExperiment(layer.getLayerName(), matchExperiment);
                     }
                 }
             }
