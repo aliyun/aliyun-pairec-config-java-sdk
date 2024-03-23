@@ -1,8 +1,12 @@
 package com.aliyun.openservices.pairec.model;
 
+import com.aliyun.openservices.pairec.common.Constants;
+import com.aliyun.openservices.pairec.util.FNV;
 import com.aliyun.tea.utils.StringUtils;
 import com.google.gson.annotations.SerializedName;
+import org.apache.commons.codec.digest.DigestUtils;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -177,13 +181,47 @@ public class Layer {
 
     public ExperimentGroup findMatchExperimentGroup( ExperimentContext experimentContext)  {
 
+        // first find debug users
         for (ExperimentGroup experimentGroup : this.experimentGroupList) {
-            if (!StringUtils.isEmpty(experimentGroup.getFilter()) || (experimentGroup.getCrowdId() != null && experimentGroup.getCrowdId() > 0)) {
+            if (experimentGroup.matchDebugUser(experimentContext)) {
+                return experimentGroup;
+            }
+        }
+
+        // find filter or crowdid experiment group
+        for (ExperimentGroup experimentGroup : this.experimentGroupList) {
+            if (StringUtils.isEmpty(experimentGroup.getCrowdTargetType())) {
+                if (!StringUtils.isEmpty(experimentGroup.getFilter()) || (experimentGroup.getCrowdId() != null && experimentGroup.getCrowdId() > 0)) {
+                    if (experimentGroup.match(experimentContext)) {
+                        return  experimentGroup;
+                    }
+                }
+            } else if (Constants.CrowdTargetType_Filter.equals(experimentGroup.getCrowdTargetType()) ||
+                    Constants.CrowdTargetType_CrowdId.equals(experimentGroup.getCrowdTargetType())) {
                 if (experimentGroup.match(experimentContext)) {
-                   return  experimentGroup;
+                    return  experimentGroup;
                 }
             }
         }
+
+        // find random experiment group
+        for (ExperimentGroup experimentGroup : this.experimentGroupList) {
+            if (Constants.CrowdTargetType_Random.equals(experimentGroup.getCrowdTargetType())) {
+                StringBuilder hashKey = new StringBuilder(experimentContext.getUid());
+                hashKey.append("_EXPROOM").append(this.getExpRoomId())
+                        .append("_LAYER").append(this.getLayerId());
+
+                String hashValue = hashValue(hashKey.toString());
+
+                ExperimentContext randomExperimentContext = new ExperimentContext();
+                randomExperimentContext.setUid(hashValue);
+                randomExperimentContext.setFilterParams(experimentContext.getFilterParams());
+                if (experimentGroup.match(randomExperimentContext)) {
+                    return experimentGroup;
+                }
+            }
+        }
+
 
         for (ExperimentGroup experimentGroup : this.experimentGroupList) {
             if (StringUtils.isEmpty(experimentGroup.getFilter()) && (experimentGroup.getCrowdId() == null  ||  experimentGroup.getCrowdUsers().size() == 0)) {
@@ -194,5 +232,11 @@ public class Layer {
         }
 
         return null;
+    }
+    private String hashValue(String hashKey) {
+        byte[] md5Hex = DigestUtils.md5(hashKey);
+        BigInteger value = (new FNV()).fnv1_64(md5Hex);
+
+        return value.toString();
     }
 }

@@ -1,6 +1,7 @@
 package com.aliyun.openservices.pairec.model;
 
 import com.aliyun.openservices.pairec.JSON;
+import com.aliyun.openservices.pairec.common.Constants;
 import com.aliyun.tea.utils.StringUtils;
 import com.google.gson.annotations.SerializedName;
 
@@ -64,6 +65,12 @@ public class ExperimentGroup {
     private Integer distributionType = null;
 
     private Integer distributionTimeDuration = null;
+
+    @SerializedName("crowd_target_type")
+    private String crowdTargetType = null;
+
+    @SerializedName("holding_buckets")
+    private String holdingBuckets = null;
     private List<String> crowdUsers = null;
 
     private List<String> debugCrowdUsers = null;
@@ -383,6 +390,22 @@ public class ExperimentGroup {
         this.debugCrowdUsers = debugCrowdUsers;
     }
 
+    public String getCrowdTargetType() {
+        return crowdTargetType;
+    }
+
+    public void setCrowdTargetType(String crowdTargetType) {
+        this.crowdTargetType = crowdTargetType;
+    }
+
+    public String getHoldingBuckets() {
+        return holdingBuckets;
+    }
+
+    public void setHoldingBuckets(String holdingBuckets) {
+        this.holdingBuckets = holdingBuckets;
+    }
+
     @Override
     public boolean equals(java.lang.Object o) {
         if (this == o) {
@@ -408,12 +431,15 @@ public class ExperimentGroup {
                 Objects.equals(this.distributionType, experimentGroup.distributionType) &&
                 Objects.equals(this.distributionTimeDuration, experimentGroup.distributionTimeDuration) &&
                 Objects.equals(this.debugCrowdId, experimentGroup.debugCrowdId) &&
+                Objects.equals(this.crowdTargetType, experimentGroup.crowdTargetType) &&
+                Objects.equals(this.holdingBuckets, experimentGroup.holdingBuckets) &&
                 Objects.equals(this.status, experimentGroup.status);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(expGroupId, layerId, expRoomId, sceneId, expGroupName, expGroupInfo, debugUsers, owner, needAA, filter, expGroupConfig, reserveBuckets, type, status, distributionType, distributionTimeDuration, debugCrowdId);
+        return Objects.hash(expGroupId, layerId, expRoomId, sceneId, expGroupName, expGroupInfo, debugUsers, owner, needAA, filter, expGroupConfig, reserveBuckets, type, status,
+                distributionType, distributionTimeDuration, debugCrowdId, crowdTargetType, holdingBuckets);
     }
 
 
@@ -439,6 +465,8 @@ public class ExperimentGroup {
         sb.append("    distributionType: ").append(toIndentedString(distributionType)).append("\n");
         sb.append("    distributionTimeDuration: ").append(toIndentedString(distributionTimeDuration)).append("\n");
         sb.append("    debugCrowdId: ").append(toIndentedString(debugCrowdId)).append("\n");
+        sb.append("    crowdTargetType: ").append(toIndentedString(crowdTargetType)).append("\n");
+        sb.append("    holdingBuckets: ").append(toIndentedString(holdingBuckets)).append("\n");
         sb.append("}");
         return sb.toString();
     }
@@ -455,8 +483,25 @@ public class ExperimentGroup {
     }
 
     public void init() {
-        if (!StringUtils.isEmpty(this.filter)) {
-            this.diversionBucket = new FilterDiversionBucket(this.filter);
+        if (StringUtils.isEmpty(this.crowdTargetType)) {
+            if (!StringUtils.isEmpty(this.filter)) {
+                this.diversionBucket = new FilterDiversionBucket(this.filter);
+            }
+
+            if (this.crowdUsers != null && this.crowdUsers.size() > 0) {
+                this.diversionBucket = new CrowdDiversionBucket(this.crowdUsers);
+            }
+        } else if (Constants.CrowdTargetType_CrowdId.equals(this.crowdTargetType)) {
+            if (this.crowdUsers != null && this.crowdUsers.size() > 0) {
+                this.diversionBucket = new CrowdDiversionBucket(this.crowdUsers);
+            }
+        } else if (Constants.CrowdTargetType_Filter.equals(this.crowdTargetType)) {
+            if (!StringUtils.isEmpty(this.filter)) {
+                this.diversionBucket = new FilterDiversionBucket(this.filter);
+            }
+
+        } else if (Constants.CrowdTargetType_Random.equals(this.crowdTargetType)) {
+            this.diversionBucket = new UidDiversionBucket(100, this.holdingBuckets);
         }
 
         if (!StringUtils.isEmpty(this.debugUsers)) {
@@ -470,9 +515,6 @@ public class ExperimentGroup {
                 this.debugUserMap.put(user, true);
             }
         }
-        if (this.crowdUsers != null && this.crowdUsers.size() > 0) {
-            this.diversionBucket = new CrowdDiversionBucket(this.crowdUsers);
-        }
 
         if (!StringUtils.isEmpty(this.expGroupConfig)) {
             this.experimentParams = json.deserialize(this.expGroupConfig, this.experimentParams.getClass());
@@ -483,19 +525,28 @@ public class ExperimentGroup {
         experimentList.add(experiment);
     }
 
+    public boolean matchDebugUser(ExperimentContext experimentContext) {
+        return this.debugUserMap.containsKey(experimentContext.getUid());
+    }
     public boolean match(ExperimentContext experimentContext) {
-        if (StringUtils.isEmpty(this.debugUsers) && StringUtils.isEmpty(this.filter)
-                && (this.crowdUsers == null || this.crowdUsers.size() == 0)) {
+        if (StringUtils.isEmpty(this.crowdTargetType)) {
+            if (StringUtils.isEmpty(this.filter)
+                    && (this.crowdUsers == null || this.crowdUsers.size() == 0)) {
+                return true;
+            }
+            if (null != this.diversionBucket) {
+                return this.diversionBucket.match(experimentContext);
+            }
+            return false;
+
+        } else if (Constants.CrowdTargetType_ALL.equals(this.crowdTargetType)){
             return true;
+        } else  {
+            if (null != this.diversionBucket) {
+                return this.diversionBucket.match(experimentContext);
+            }
         }
 
-        if (this.debugUserMap.containsKey(experimentContext.getUid())) {
-            return true;
-        }
-
-        if (null != this.diversionBucket) {
-            return this.diversionBucket.match(experimentContext);
-        }
         return false;
     }
 

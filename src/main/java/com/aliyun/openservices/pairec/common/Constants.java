@@ -32,6 +32,13 @@ public class Constants {
     public static final int Experiment_Type_Test = 2;
     public static final int Experiment_Type_Default = 3;
 
+    public static final String CrowdTargetType_ALL = "All";
+
+    public static final String CrowdTargetType_Filter = "Filter";
+
+    public static final String CrowdTargetType_CrowdId = "CrowdId";
+
+    public static final String CrowdTargetType_Random = "Random";
     public static String environmentDesc2OpenApiString(String environment) {
         if (environment.equals(Environment_Daily_Desc)) {
             return "Daily";
