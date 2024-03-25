@@ -38,6 +38,8 @@ public class ExperimentGroupApi extends BaseApi {
             experimentGroup.setFilter(group.getFilter());
             experimentGroup.setExpGroupConfig(group.getConfig());
             experimentGroup.setReserveBuckets(group.getReservedBuckets());
+            experimentGroup.setCrowdTargetType(group.getCrowdTargetType());
+            experimentGroup.setHoldingBuckets( group.getHoldingBuckets());
 
             experimentGroup.setDebugCrowdId(0);
             if (!StringUtils.isEmpty(group.getDebugCrowdId())) {

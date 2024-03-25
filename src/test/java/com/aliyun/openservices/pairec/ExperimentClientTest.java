@@ -45,11 +45,11 @@ public class ExperimentClientTest {
     public void matchTest() throws Exception {
         experimentClient.init();
         ExperimentContext experimentContext = new ExperimentContext();
-        experimentContext.setUid("1034416392");
+        experimentContext.setUid("103441639");
         //experimentContext.setUid("");
         experimentContext.setRequestId("pvid");
         Map<String, Object> filters = new HashMap<>();
-        filters.put("country", "new12");
+        filters.put("country", "new1");
         experimentContext.setFilterParams(filters);
 
         ExperimentResult experimentResult = experimentClient.matchExperiment("home_feed", experimentContext);
