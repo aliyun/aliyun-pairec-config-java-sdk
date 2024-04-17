@@ -224,10 +224,12 @@ public class Layer {
 
 
         for (ExperimentGroup experimentGroup : this.experimentGroupList) {
-            if (StringUtils.isEmpty(experimentGroup.getFilter()) && (experimentGroup.getCrowdId() == null  ||  experimentGroup.getCrowdUsers().size() == 0)) {
-                if (experimentGroup.match(experimentContext)) {
-                    return  experimentGroup;
+            if (StringUtils.isEmpty(experimentGroup.getCrowdTargetType())) {
+                if (StringUtils.isEmpty(experimentGroup.getFilter()) && (experimentGroup.getCrowdId() == null  ||  experimentGroup.getCrowdUsers().size() == 0)) {
+                        return  experimentGroup;
                 }
+            } else if (Constants.CrowdTargetType_ALL.equals(experimentGroup.getCrowdTargetType())) {
+                return experimentGroup;
             }
         }
 
