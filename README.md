@@ -7,7 +7,7 @@ Java sdk for PA-REC config server. Aliyun product [link](https://pairec.console.
 <dependency>
   <groupId>com.aliyun.openservices.aiservice</groupId>
   <artifactId>pairec-sdk</artifactId>
-  <version>1.0.4</version>
+  <version>1.0.5</version>
 </dependency>
 ```
 
@@ -66,6 +66,9 @@ public class ExperimentTest {
 
 ```
 ## 版本说明
+1.0.5 (2024-07-05)
+* 修复实验组设置过滤条件时，上下文不传过滤参数时抛出异常
+ 
 1.0.4 (2024-04-17)
 * 修复实验组随机流量匹配bug, 无法匹配所有人的实验组
  
