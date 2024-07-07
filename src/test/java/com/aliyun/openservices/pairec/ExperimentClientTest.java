@@ -18,10 +18,10 @@ public class ExperimentClientTest {
 
     @Before
     public void setUpExperimentClient() throws Exception {
-        String regionId = "cn-hangzhou";
+        String regionId = "cn-beijing";
         String instanceId = System.getenv("INSTANCE_ID");
-        String accessId = System.getenv("ACCESS_ID");
-        String accessKey = System.getenv("ACCESS_KEY");
+        String accessId = System.getenv("ALIBABA_CLOUD_ACCESS_KEY_ID");
+        String accessKey = System.getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET");
         Configuration configuration = new Configuration(regionId, accessId, accessKey, instanceId);
         configuration.setEnvironment(Constants.Environment_Product_Desc);
         ApiClient apiClient = new ApiClient(configuration);
@@ -49,7 +49,8 @@ public class ExperimentClientTest {
         //experimentContext.setUid("");
         experimentContext.setRequestId("pvid");
         Map<String, Object> filters = new HashMap<>();
-        filters.put("country", "new1");
+        filters.put("country", "new");
+        filters.put("age", 30);
         experimentContext.setFilterParams(filters);
 
         ExperimentResult experimentResult = experimentClient.matchExperiment("home_feed", experimentContext);

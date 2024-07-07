@@ -5,7 +5,7 @@
   <artifactId>pairec-sdk</artifactId>
   <packaging>jar</packaging>
   <name>pairec-sdk</name>
-  <version>1.0.4</version>
+  <version>1.0.5</version>
   <url>>http://maven.apache.org</url>
   <description>SDK for PAI-REC config service</description>
   <scm>

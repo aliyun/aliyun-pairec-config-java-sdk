@@ -11,6 +11,10 @@ public class FilterDiversionBucket implements DiversionBucket {
 
     @Override
     public boolean match(ExperimentContext context) {
-        return MVEL.evalToBoolean(this.filter, context.getFilterParams());
+        try {
+            return MVEL.evalToBoolean(this.filter, context.getFilterParams());
+        } catch (Exception e) {
+            return false;
+        }
     }
 }
