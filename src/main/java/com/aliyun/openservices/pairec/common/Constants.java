@@ -51,5 +51,6 @@ public class Constants {
         return "";
     }
 
+    public static final String Global_Scene_Name = "pairec_abtest_global_scene";
 }
 
