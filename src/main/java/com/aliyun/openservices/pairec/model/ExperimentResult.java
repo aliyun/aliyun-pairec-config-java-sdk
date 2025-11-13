@@ -4,19 +4,15 @@ import com.aliyun.openservices.pairec.common.Constants;
 import com.aliyun.openservices.pairec.util.JsonUtils;
 import com.aliyun.openservices.pairec.util.TemplateUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.zip.CheckedOutputStream;
 
 import static com.aliyun.openservices.pairec.ExperimentClient.logger;
 
 public class ExperimentResult {
-    private static final Logger log = LoggerFactory.getLogger(ExperimentResult.class);
     private String expId = "";
 
     private String sceneName;
