@@ -188,8 +188,16 @@ public class ExperimentClient {
         ExperimentResult experimentResult = new ExperimentResult(sceneName, experimentContext);
 
         if (!sceneData.containsKey(sceneName)) {
-            logger.warn("scene:{}, not found the scene info", sceneName);
+            if (!Constants.Global_Scene_Name.equals(sceneName)){
+                logger.warn("scene:{}, not found the scene info", sceneName);
+            }
             return experimentResult;
+        }
+
+        if (!Constants.Global_Scene_Name.equals(sceneName)) {
+            experimentResult.setGlobalSceneExperimentResult(
+                    matchExperiment(Constants.Global_Scene_Name, experimentContext)
+            );
         }
 
         Scene scene = sceneData.get(sceneName);

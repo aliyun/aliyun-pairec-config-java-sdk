@@ -5,7 +5,7 @@
   <artifactId>pairec-sdk</artifactId>
   <packaging>jar</packaging>
   <name>pairec-sdk</name>
-  <version>1.0.5</version>
+  <version>1.0.6</version>
   <url>>http://maven.apache.org</url>
   <description>SDK for PAI-REC config service</description>
   <scm>
@@ -108,6 +108,17 @@
           </plugin>
 
           <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>0.8.0</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <autoPublish>true</autoPublish>
+            </configuration>
+          </plugin>
+          <!--
+          <plugin>
             <groupId>org.sonatype.plugins</groupId>
             <artifactId>nexus-staging-maven-plugin</artifactId>
             <version>1.6.13</version>
@@ -119,6 +130,7 @@
               <stagingProfileId>260e4248b30bd2</stagingProfileId>
             </configuration>
           </plugin>
+          -->
         </plugins>
       </build>
       <distributionManagement>
@@ -265,7 +277,26 @@
        <artifactId>mvel2</artifactId>
        <version>2.4.12.Final</version>
      </dependency>
-
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-core</artifactId>
+      <version>2.15.2</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-annotations</artifactId>
+      <version>2.15.2</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.15.2</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-lang3</artifactId>
+      <version>3.12.0</version>
+    </dependency>
   </dependencies>
   <properties>
     <java.version>1.8</java.version>
