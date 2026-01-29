@@ -4,95 +4,73 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 public class RecallEngineClientTest {
-    
+
     private RecallEngineClient client;
-    
+
     @Before
     public void setUp() {
+        String endpoint = System.getenv("RECALL_ENGINE_SERVICE_ENDPOINT");
+        String username = System.getenv("RECALL_ENGINE_SERVICE_USERNAME");
+        String password = System.getenv("RECALL_ENGINE_SERVICE_PASSWORD");
+        String token = System.getenv("RECALL_ENGINE_SERVICE_TOKEN");
+
         // 使用测试环境配置
-        client = new RecallEngineClient(
-            "http://localhost:8080",
-            "test_user",
-            "test_password"
-        );
-        
-        client.withRetryTimes(2)
-              .withRequestHeader("X-Test-Header", "test-value");
-    }
-    
-    @Test
-    public void testClientCreation() {
+        client = new RecallEngineClient(endpoint, username, password);
+
+        client.withRetryTimes(2).withRequestHeader("Authorization", token);
+
         assertNotNull(client);
-        assertEquals(2, client.retryTimes);
-        assertNotNull(client.requestHeaders);
-        assertEquals("test-value", client.requestHeaders.get("X-Test-Header"));
     }
-    
+
     @Test
-    public void testRecallRequest() {
+    public void testRecall() throws RecallEngineException {
+        String instanceId = System.getenv("INSTANCE_ID");
+
         RecallRequest request = new RecallRequest();
-        request.setInstanceId("test-instance");
-        request.setService("test-service");
-        request.setVersion("v1");
-        request.setUid("user123");
-        
+        request.setInstanceId(instanceId);
+        request.setService("recall_test");
+        request.setVersion("V1");
+        request.setUid("123");
+
         // Set recalls configuration
         Map<String, RecallConf> recalls = new HashMap<>();
-        recalls.put("recall1", new RecallConf("trigger1", 100));
+        recalls.put("u2i_recall", new RecallConf("123", 100));
         request.setRecalls(recalls);
-        
-        // Set context parameters
-        Map<String, Object> contextParams = new HashMap<>();
-        contextParams.put("param1", "value1");
-        request.setContextParams(contextParams);
-        
-        assertNotNull(request);
-        assertEquals("test-instance", request.getInstanceId());
-        assertEquals("user123", request.getUid());
-        assertNotNull(request.getRecalls());
+
+        RecallResponse resp = client.recall(request);
+        assertEquals(100, resp.getResult().size());
     }
-    
+
+
     @Test
-    public void testWriteRequest() {
+    public void testWrite() throws RecallEngineException {
+        String instanceId = System.getenv("INSTANCE_ID");
+
         WriteRequest request = new WriteRequest();
         request.setRequestId("write-req-123");
-        
+
         Map<String, Object> item = new HashMap<>();
-        item.put("id", "item1");
-        item.put("name", "Product 1");
+        item.put("user_id", "123");
+        item.put("item_id", "item_123");
         item.put("score", 0.95);
-        
+
         java.util.List<Map<String, Object>> content = new java.util.ArrayList<>();
         content.add(item);
         request.setContent(content);
-        
+
         assertNotNull(request);
         assertEquals("write-req-123", request.getRequestId());
         assertNotNull(request.getContent());
         assertEquals(1, request.getContent().size());
-    }
-    
-    @Test
-    public void testWithRetryTimes() {
-        RecallEngineClient newClient = new RecallEngineClient("http://test.com", "user", "pass");
-        RecallEngineClient result = newClient.withRetryTimes(5);
-        
-        assertSame(newClient, result); // 验证链式调用
-        assertEquals(5, newClient.retryTimes);
-    }
-    
-    @Test
-    public void testWithRequestHeader() {
-        RecallEngineClient newClient = new RecallEngineClient("http://test.com", "user", "pass");
-        RecallEngineClient result = newClient.withRequestHeader("Custom-Header", "custom-value");
-        
-        assertSame(newClient, result); // 验证链式调用
-        assertEquals("custom-value", newClient.requestHeaders.get("Custom-Header"));
+
+        WriteResponse resp = client.write(instanceId, "u2i_table", request);
+        assertEquals("write-req-123", resp.getRequestId());
+        assertEquals("OK", resp.getCode());
     }
 }

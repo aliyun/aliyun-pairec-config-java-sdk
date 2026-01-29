@@ -15,7 +15,6 @@ public class Column<T> implements IColumn {
         this.data = (T[]) java.lang.reflect.Array.newInstance(type, size);
     }
     
-    @SuppressWarnings("unchecked")
     public Column(T[] data) {
         this.data = Arrays.copyOf(data, data.length);
     }

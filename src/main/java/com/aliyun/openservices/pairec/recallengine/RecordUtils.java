@@ -31,52 +31,72 @@ public class RecordUtils {
             }
             
             byte columnType = columnTable.fieldValueColumnType();
-            Table unionTable = new Table();
-            columnTable.fieldValueColumn(unionTable);
             
             switch (columnType) {
                 case FieldValueColumn.StringValueColumn:
-                    deserializeStringColumn(record, name, size, unionTable);
+                    StringValueColumn stringCol = new StringValueColumn();
+                    columnTable.fieldValueColumn(stringCol);
+                    deserializeStringColumn(record, name, size, stringCol);
                     break;
                     
                 case FieldValueColumn.Int32ValueColumn:
-                    deserializeInt32Column(record, name, size, unionTable);
+                    Int32ValueColumn int32Col = new Int32ValueColumn();
+                    columnTable.fieldValueColumn(int32Col);
+                    deserializeInt32Column(record, name, size, int32Col);
                     break;
                     
                 case FieldValueColumn.Int64ValueColumn:
-                    deserializeInt64Column(record, name, size, unionTable);
+                    Int64ValueColumn int64Col = new Int64ValueColumn();
+                    columnTable.fieldValueColumn(int64Col);
+                    deserializeInt64Column(record, name, size, int64Col);
                     break;
                     
                 case FieldValueColumn.FloatValueColumn:
-                    deserializeFloatColumn(record, name, size, unionTable);
+                    FloatValueColumn floatCol = new FloatValueColumn();
+                    columnTable.fieldValueColumn(floatCol);
+                    deserializeFloatColumn(record, name, size, floatCol);
                     break;
                     
                 case FieldValueColumn.DoubleValueColumn:
-                    deserializeDoubleColumn(record, name, size, unionTable);
+                    DoubleValueColumn doubleCol = new DoubleValueColumn();
+                    columnTable.fieldValueColumn(doubleCol);
+                    deserializeDoubleColumn(record, name, size, doubleCol);
                     break;
                     
                 case FieldValueColumn.BoolValueColumn:
-                    deserializeBoolColumn(record, name, size, unionTable);
+                    BoolValueColumn boolCol = new BoolValueColumn();
+                    columnTable.fieldValueColumn(boolCol);
+                    deserializeBoolColumn(record, name, size, boolCol);
                     break;
                     
                 case FieldValueColumn.MultiStringValueColumn:
-                    deserializeMultiStringColumn(record, name, size, unionTable);
+                    MultiStringValueColumn multiStringCol = new MultiStringValueColumn();
+                    columnTable.fieldValueColumn(multiStringCol);
+                    deserializeMultiStringColumn(record, name, size, multiStringCol);
                     break;
                     
                 case FieldValueColumn.MultiInt32ValueColumn:
-                    deserializeMultiInt32Column(record, name, size, unionTable);
+                    MultiInt32ValueColumn multiInt32Col = new MultiInt32ValueColumn();
+                    columnTable.fieldValueColumn(multiInt32Col);
+                    deserializeMultiInt32Column(record, name, size, multiInt32Col);
                     break;
                     
                 case FieldValueColumn.MultiInt64ValueColumn:
-                    deserializeMultiInt64Column(record, name, size, unionTable);
+                    MultiInt64ValueColumn multiInt64Col = new MultiInt64ValueColumn();
+                    columnTable.fieldValueColumn(multiInt64Col);
+                    deserializeMultiInt64Column(record, name, size, multiInt64Col);
                     break;
                     
                 case FieldValueColumn.MultiFloatValueColumn:
-                    deserializeMultiFloatColumn(record, name, size, unionTable);
+                    MultiFloatValueColumn multiFloatCol = new MultiFloatValueColumn();
+                    columnTable.fieldValueColumn(multiFloatCol);
+                    deserializeMultiFloatColumn(record, name, size, multiFloatCol);
                     break;
                     
                 case FieldValueColumn.MultiDoubleValueColumn:
-                    deserializeMultiDoubleColumn(record, name, size, unionTable);
+                    MultiDoubleValueColumn multiDoubleCol = new MultiDoubleValueColumn();
+                    columnTable.fieldValueColumn(multiDoubleCol);
+                    deserializeMultiDoubleColumn(record, name, size, multiDoubleCol);
                     break;
                     
                 default:
@@ -87,8 +107,7 @@ public class RecordUtils {
         return record;
     }
     
-    private static void deserializeStringColumn(Record record, String name, int size, Table table) {
-        StringValueColumn col = (StringValueColumn) table;
+    private static void deserializeStringColumn(Record record, String name, int size, StringValueColumn col) {
         
         Column<String> column = new Column<>(size, String.class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -97,8 +116,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeInt32Column(Record record, String name, int size, Table table) {
-        Int32ValueColumn col = (Int32ValueColumn) table;
+    private static void deserializeInt32Column(Record record, String name, int size, Int32ValueColumn col) {
         
         Column<Integer> column = new Column<>(size, Integer.class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -107,8 +125,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeInt64Column(Record record, String name, int size, Table table) {
-        Int64ValueColumn col = (Int64ValueColumn) table;
+    private static void deserializeInt64Column(Record record, String name, int size, Int64ValueColumn col) {
         
         Column<Long> column = new Column<>(size, Long.class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -117,8 +134,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeFloatColumn(Record record, String name, int size, Table table) {
-        FloatValueColumn col = (FloatValueColumn) table;
+    private static void deserializeFloatColumn(Record record, String name, int size, FloatValueColumn col) {
         
         Column<Float> column = new Column<>(size, Float.class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -127,8 +143,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeDoubleColumn(Record record, String name, int size, Table table) {
-        DoubleValueColumn col = (DoubleValueColumn) table;
+    private static void deserializeDoubleColumn(Record record, String name, int size, DoubleValueColumn col) {
         
         Column<Double> column = new Column<>(size, Double.class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -137,8 +152,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeBoolColumn(Record record, String name, int size, Table table) {
-        BoolValueColumn col = (BoolValueColumn) table;
+    private static void deserializeBoolColumn(Record record, String name, int size, BoolValueColumn col) {
         
         Column<Boolean> column = new Column<>(size, Boolean.class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -147,8 +161,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeMultiStringColumn(Record record, String name, int size, Table table) {
-        MultiStringValueColumn col = (MultiStringValueColumn) table;
+    private static void deserializeMultiStringColumn(Record record, String name, int size, MultiStringValueColumn col) {
         
         Column<String[]> column = new Column<>(size, String[].class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -162,8 +175,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeMultiInt32Column(Record record, String name, int size, Table table) {
-        MultiInt32ValueColumn col = (MultiInt32ValueColumn) table;
+    private static void deserializeMultiInt32Column(Record record, String name, int size, MultiInt32ValueColumn col) {
         
         Column<int[]> column = new Column<>(size, int[].class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -177,8 +189,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeMultiInt64Column(Record record, String name, int size, Table table) {
-        MultiInt64ValueColumn col = (MultiInt64ValueColumn) table;
+    private static void deserializeMultiInt64Column(Record record, String name, int size, MultiInt64ValueColumn col) {
         
         Column<long[]> column = new Column<>(size, long[].class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -192,8 +203,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeMultiFloatColumn(Record record, String name, int size, Table table) {
-        MultiFloatValueColumn col = (MultiFloatValueColumn) table;
+    private static void deserializeMultiFloatColumn(Record record, String name, int size, MultiFloatValueColumn col) {
         
         Column<float[]> column = new Column<>(size, float[].class);
         for (int j = 0; j < col.valueLength(); j++) {
@@ -207,8 +217,7 @@ public class RecordUtils {
         record.setColumn(name, column);
     }
     
-    private static void deserializeMultiDoubleColumn(Record record, String name, int size, Table table) {
-        MultiDoubleValueColumn col = (MultiDoubleValueColumn) table;
+    private static void deserializeMultiDoubleColumn(Record record, String name, int size, MultiDoubleValueColumn col) {
         
         Column<double[]> column = new Column<>(size, double[].class);
         for (int j = 0; j < col.valueLength(); j++) {
