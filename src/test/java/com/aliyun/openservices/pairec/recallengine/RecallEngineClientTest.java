@@ -44,7 +44,13 @@ public class RecallEngineClientTest {
         request.setRecalls(recalls);
 
         RecallResponse resp = client.recall(request);
-        assertEquals(100, resp.getResult().size());
+        Record result = resp.getResult();
+        assertEquals(100, result.size());
+
+        // Print more record data to verify results
+        System.out.println("Total records: " + result.size());
+        System.out.println("Field names: " + result.fieldNames());
+        System.out.println("First 5 records data: " + result.retain(5).toString());
     }
 
 
