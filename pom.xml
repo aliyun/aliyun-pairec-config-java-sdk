@@ -6,7 +6,7 @@
   <packaging>jar</packaging>
   <name>pairec-sdk</name>
   <version>1.0.7</version>
-  <url>>http://maven.apache.org</url>
+  <url>http://maven.apache.org</url>
   <description>SDK for PAI-REC config service</description>
   <scm>
     <connection>scm:git:git@github.com:aliyun/aliyun-pairec-config-java-sdk.git</connection>
@@ -142,6 +142,209 @@
         </repository>
       </distributionManagement>
     </profile>
+    <profile>
+      <id>flink-dev</id>
+      <properties>
+        <flinkVvrVersion>1.15-vvr-6.0.7</flinkVvrVersion>
+        <flinkVersion>1.15.3</flinkVersion>
+      </properties>
+      <dependencies>
+        <dependency>
+          <groupId>org.apache.flink</groupId>
+          <artifactId>flink-streaming-java</artifactId>
+          <version>${flink.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.flink</groupId>
+          <artifactId>flink-table-api-java-bridge</artifactId>
+          <version>${flink.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.flink</groupId>
+          <artifactId>flink-java</artifactId>
+          <version>${flink.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.flink</groupId>
+          <artifactId>flink-table-runtime</artifactId>
+          <version>${flink.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.flink</groupId>
+          <artifactId>flink-table-planner_2.12</artifactId>
+          <version>${flink.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>flink-1.17</id>
+      <properties>
+        <flinkVvrVersion>1.17-vvr-8.0.8</flinkVvrVersion>
+        <flinkVersion>1.17.2</flinkVersion>
+      </properties>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-shade-plugin</artifactId>
+            <version>3.5.0</version>
+            <executions>
+              <execution>
+                <phase>package</phase>
+                <goals>
+                  <goal>shade</goal>
+                </goals>
+                <configuration>
+                  <filters>
+                    <filter>
+                      <artifact>*:*</artifact>
+                      <excludes>
+                        <exclude>META-INF/*.SF</exclude>
+                        <exclude>META-INF/*.DSA</exclude>
+                        <exclude>META-INF/*.RSA</exclude>
+                      </excludes>
+                    </filter>
+                  </filters>
+                  <transformers>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                    </transformer>
+                  </transformers>
+                  <relocations>
+                    <relocation>
+                      <pattern>okhttp3</pattern>
+                      <shadedPattern>pairec.shade.okhttp3</shadedPattern>
+                    </relocation>
+                    <relocation>
+                      <pattern>okio</pattern>
+                      <shadedPattern>pairec.shade.okio</shadedPattern>
+                    </relocation>
+                    <relocation>
+                      <pattern>kotlin</pattern>
+                      <shadedPattern>pairec.shade.kotlin</shadedPattern>
+                    </relocation>
+                  </relocations>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
+      <id>flink-1.20</id>
+      <activation>
+        <activeByDefault>true</activeByDefault>
+      </activation>
+      <properties>
+        <flinkVvrVersion>1.20-vvr-11.5.0-jdk11</flinkVvrVersion>
+        <flinkVersion>1.20.3</flinkVersion>
+      </properties>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-shade-plugin</artifactId>
+            <version>3.5.0</version>
+            <executions>
+              <execution>
+                <phase>package</phase>
+                <goals>
+                  <goal>shade</goal>
+                </goals>
+                <configuration>
+                  <filters>
+                    <filter>
+                      <artifact>*:*</artifact>
+                      <excludes>
+                        <exclude>META-INF/*.SF</exclude>
+                        <exclude>META-INF/*.DSA</exclude>
+                        <exclude>META-INF/*.RSA</exclude>
+                      </excludes>
+                    </filter>
+                  </filters>
+                  <transformers>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                    </transformer>
+                  </transformers>
+                  <relocations>
+                    <relocation>
+                      <pattern>okhttp3</pattern>
+                      <shadedPattern>pairec.shade.okhttp3</shadedPattern>
+                    </relocation>
+                    <relocation>
+                      <pattern>okio</pattern>
+                      <shadedPattern>pairec.shade.okio</shadedPattern>
+                    </relocation>
+                    <relocation>
+                      <pattern>kotlin</pattern>
+                      <shadedPattern>pairec.shade.kotlin</shadedPattern>
+                    </relocation>
+                  </relocations>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
+      <id>flink-1.15</id>
+      <properties>
+        <flinkVvrVersion>1.15-vvr-6.0.7</flinkVvrVersion>
+        <flinkVersion>1.15.3</flinkVersion>
+      </properties>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-shade-plugin</artifactId>
+            <version>3.5.0</version>
+            <executions>
+              <execution>
+                <phase>package</phase>
+                <goals>
+                  <goal>shade</goal>
+                </goals>
+                <configuration>
+                  <filters>
+                    <filter>
+                      <artifact>*:*</artifact>
+                      <excludes>
+                        <exclude>META-INF/*.SF</exclude>
+                        <exclude>META-INF/*.DSA</exclude>
+                        <exclude>META-INF/*.RSA</exclude>
+                      </excludes>
+                    </filter>
+                  </filters>
+                  <transformers>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                    </transformer>
+                  </transformers>
+                  <relocations>
+                    <relocation>
+                      <pattern>okhttp3</pattern>
+                      <shadedPattern>pairec.shade.okhttp3</shadedPattern>
+                    </relocation>
+                    <relocation>
+                      <pattern>okio</pattern>
+                      <shadedPattern>pairec.shade.okio</shadedPattern>
+                    </relocation>
+                    <relocation>
+                      <pattern>kotlin</pattern>
+                      <shadedPattern>pairec.shade.kotlin</shadedPattern>
+                    </relocation>
+                  </relocations>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
   </profiles>
 
 
@@ -225,6 +428,12 @@
         </includes>
         <filtering>true</filtering>
       </resource>
+      <resource>
+        <directory>src/main/resources</directory>
+        <includes>
+          <include>**/*</include>
+        </includes>
+      </resource>
     </resources>
   </build>
 
@@ -302,6 +511,31 @@
       <artifactId>flatbuffers-java</artifactId>
       <version>25.2.10</version>
     </dependency>
+    <!-- Flink dependencies -->
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-streaming-java</artifactId>
+      <version>${flink.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-table-api-java-bridge</artifactId>
+      <version>${flink.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-table-common</artifactId>
+      <version>${flink.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-table-runtime</artifactId>
+      <version>${flink.version}</version>
+      <scope>provided</scope>
+    </dependency>
   </dependencies>
   <properties>
     <java.version>1.8</java.version>
@@ -319,5 +553,6 @@
     <gpg-plugin.version>1.6</gpg-plugin.version>
     <jar-plugin.version>3.0.2</jar-plugin.version>
     <source-plugin.version>3.0.1</source-plugin.version>
+    <flink.version>${flinkVersion}</flink.version>
   </properties>
 </project>
