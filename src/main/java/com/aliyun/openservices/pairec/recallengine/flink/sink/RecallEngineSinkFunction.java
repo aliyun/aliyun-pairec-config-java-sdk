@@ -9,16 +9,20 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.BooleanType;
+import org.apache.flink.table.types.logical.DateType;
 import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.FloatType;
 import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.LocalZonedTimestampType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.TimestampType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.RowKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -117,6 +121,17 @@ public class RecallEngineSinkFunction implements SinkFunction<RowData> {
             return value.getString(index).toString();
         } else if (type instanceof BooleanType) {
             return value.getBoolean(index);
+        } else if (type instanceof TimestampType) {
+            // Convert TIMESTAMP to string
+            return value.getTimestamp(index, ((TimestampType) type).getPrecision()).toString();
+        } else if (type instanceof LocalZonedTimestampType) {
+            // Convert LOCAL_ZONED_TIMESTAMP to string
+            return value.getTimestamp(index, ((LocalZonedTimestampType) type).getPrecision()).toString();
+        } else if (type instanceof DateType) {
+            // Convert DATE to string (format: yyyy-MM-dd)
+            int daysSinceEpoch = value.getInt(index);
+            LocalDate date = LocalDate.ofEpochDay(daysSinceEpoch);
+            return date.toString();
         } else if (type instanceof ArrayType) {
             return extractArrayValue(value.getArray(index), (ArrayType) type);
         } else {
@@ -133,13 +148,29 @@ public class RecallEngineSinkFunction implements SinkFunction<RowData> {
         LogicalType elementType = arrayType.getElementType();
         
         if (elementType instanceof IntType) {
-            return arrayData.toIntArray();
+            int[] intArray = new int[arrayData.size()];
+            for (int j = 0; j < arrayData.size(); j++) {
+                intArray[j] = arrayData.getInt(j);
+            }
+            return intArray;
         } else if (elementType instanceof BigIntType) {
-            return arrayData.toLongArray();
+            long[] longArray = new long[arrayData.size()];
+            for (int j = 0; j < arrayData.size(); j++) {
+                longArray[j] = arrayData.getLong(j);
+            }
+            return longArray;
         } else if (elementType instanceof FloatType) {
-            return arrayData.toFloatArray();
+            float[] floatArray = new float[arrayData.size()];
+            for (int j = 0; j < arrayData.size(); j++) {
+                floatArray[j] = arrayData.getFloat(j);
+            }
+            return floatArray;
         } else if (elementType instanceof DoubleType) {
-            return arrayData.toDoubleArray();
+            double[] doubleArray = new double[arrayData.size()];
+            for (int j = 0; j < arrayData.size(); j++) {
+                doubleArray[j] = arrayData.getDouble(j);
+            }
+            return doubleArray;
         } else if (elementType instanceof VarCharType) {
             String[] stringArray = new String[arrayData.size()];
             for (int j = 0; j < arrayData.size(); j++) {
