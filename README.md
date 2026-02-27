@@ -65,6 +65,12 @@ public class ExperimentTest {
 }
 
 ```
+## 打包
+
+```shell
+mvn clean  -Dmaven.test.skip=true  package -P flink-1.20
+```
+
 ## 版本说明
 1.0.7 (2026-02-03)
 * 召回管理client发布 

@@ -99,8 +99,14 @@ public class RecallEngineSinkFunction implements SinkFunction<RowData> {
             
             WriteRequest request = new WriteRequest();
             request.setContent(content);
-            
-            client.write(instanceId, table, request);
+
+            try {
+                client.write(instanceId, table, request);
+            } catch (Exception e) {
+                LOG.error("Failed to write data to RecallEngine. instanceId: {}, table: {}, data: {}, error: {}",
+                        instanceId, table, data, e.getMessage(), e);
+                // Swallow the exception to continue processing
+            }
         }
     }
     
