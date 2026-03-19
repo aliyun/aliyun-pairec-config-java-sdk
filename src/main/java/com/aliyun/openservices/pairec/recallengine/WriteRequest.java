@@ -10,12 +10,15 @@ import java.util.Map;
 public class WriteRequest {
     @JsonProperty("request_id")
     private String requestId;
-    
+
     @JsonProperty("content")
     private List<Map<String, Object>> content;
-    
+
     private String versionId;
-    
+
+    @JsonProperty("insert_mode")
+    private String insertMode;
+
     public WriteRequest() {
     }
     
@@ -41,5 +44,13 @@ public class WriteRequest {
     
     public void setVersionId(String versionId) {
         this.versionId = versionId;
+    }
+
+    public String getInsertMode() {
+        return insertMode;
+    }
+
+    public void setInsertMode(String insertMode) {
+        this.insertMode = insertMode;
     }
 }

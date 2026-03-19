@@ -40,12 +40,13 @@ public class RecallEngineClient {
     private final List<WriteItem> writeData = new ArrayList<>();
     private final ReentrantLock writeLock = new ReentrantLock();
     private final Condition writeCondition = writeLock.newCondition();
-    private final ExecutorService writeExecutor = Executors.newFixedThreadPool(4);
+    private ExecutorService writeExecutor;
     private volatile boolean running = true;
     private Thread asyncWriteThread;
     private int batchSize = 20;
     private long flushIntervalMs = 50;
     private WriteCallback globalCallback;
+    private int writeThreadPoolSize = 4;
     
     /**
      * Create a new RecallEngineClient
@@ -205,11 +206,12 @@ public class RecallEngineClient {
         }
 
         int itemCount = request.getContent().size();
+        String insertMode = request.getInsertMode();
 
         writeLock.lock();
         try {
             for (Map<String, Object> data : request.getContent()) {
-                writeData.add(new WriteItem(instanceId, table, data));
+                writeData.add(new WriteItem(instanceId, table, data, null, insertMode));
             }
             if (writeData.size() >= batchSize) {
                 writeCondition.signal();
@@ -249,11 +251,12 @@ public class RecallEngineClient {
         }
 
         int itemCount = request.getContent().size();
+        String insertMode = request.getInsertMode();
 
         writeLock.lock();
         try {
             for (Map<String, Object> data : request.getContent()) {
-                writeData.add(new WriteItem(instanceId, table, data, callback));
+                writeData.add(new WriteItem(instanceId, table, data, callback, insertMode));
             }
             if (writeData.size() >= batchSize) {
                 writeCondition.signal();
@@ -362,6 +365,27 @@ public class RecallEngineClient {
     }
 
     /**
+     * Configure write thread pool size
+     *
+     * @param poolSize thread pool size for async write (default: 4)
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withWriteThreadPoolSize(int poolSize) {
+        this.writeThreadPoolSize = poolSize;
+        return this;
+    }
+
+    /**
+     * Get or create the write executor
+     */
+    private ExecutorService getWriteExecutor() {
+        if (writeExecutor == null || writeExecutor.isShutdown()) {
+            writeExecutor = Executors.newFixedThreadPool(writeThreadPoolSize);
+        }
+        return writeExecutor;
+    }
+
+    /**
      * Start the async write background thread
      */
     private void startAsyncWriteThread() {
@@ -384,6 +408,15 @@ public class RecallEngineClient {
                 } finally {
                     writeLock.unlock();
                 }
+            }
+            // Handle remaining data after thread stops
+            writeLock.lock();
+            try {
+                if (!writeData.isEmpty()) {
+                    doAsyncWrite();
+                }
+            } finally {
+                writeLock.unlock();
             }
             logger.info(threadName + " has stopped.");
         }, threadName);
@@ -408,16 +441,6 @@ public class RecallEngineClient {
                     }
                 }
             }
-
-            writeExecutor.shutdown();
-            try {
-                if (!writeExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    writeExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                writeExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
         } finally {
             writeLock.unlock();
         }
@@ -436,8 +459,8 @@ public class RecallEngineClient {
         List<WriteItem> tempList = new ArrayList<>(writeData);
         writeData.clear();
 
-        return writeExecutor.submit(() -> {
-            // Group by instanceId, table, and callback
+        return getWriteExecutor().submit(() -> {
+            // Group by instanceId, table, callback, and insertMode
             Map<String, List<WriteItem>> groupedItems = new HashMap<>();
             for (WriteItem item : tempList) {
                 // Include callback in the key to group items with same callback together
@@ -466,6 +489,7 @@ public class RecallEngineClient {
                         content.add(item.data);
                     }
                     request.setContent(content);
+                    request.setInsertMode(items.get(0).insertMode);
 
                     WriteResponse response = doWrite(instanceId, table, request);
                     logger.debug("Async write completed: {} items to {}/{}", items.size(), instanceId, table);
@@ -519,9 +543,17 @@ public class RecallEngineClient {
         // Flush remaining data
         writeFlush();
 
-        // Shutdown executors
-        if (!writeExecutor.isShutdown()) {
-            writeExecutor.shutdownNow();
+        // Shutdown executor
+        if (writeExecutor != null && !writeExecutor.isShutdown()) {
+            writeExecutor.shutdown();
+            try {
+                if (!writeExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    writeExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                writeExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -534,17 +566,23 @@ public class RecallEngineClient {
         final Map<String, Object> data;
         final long timestamp;
         final WriteCallback callback;
+        final String insertMode;
 
         WriteItem(String instanceId, String table, Map<String, Object> data) {
-            this(instanceId, table, data, null);
+            this(instanceId, table, data, null, null);
         }
 
         WriteItem(String instanceId, String table, Map<String, Object> data, WriteCallback callback) {
+            this(instanceId, table, data, callback, null);
+        }
+
+        WriteItem(String instanceId, String table, Map<String, Object> data, WriteCallback callback, String insertMode) {
             this.instanceId = instanceId;
             this.table = table;
             this.data = data;
             this.timestamp = System.currentTimeMillis();
             this.callback = callback;
+            this.insertMode = insertMode;
         }
     }
 }
