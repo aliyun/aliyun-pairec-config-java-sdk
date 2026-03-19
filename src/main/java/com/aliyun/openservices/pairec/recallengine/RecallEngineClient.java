@@ -464,7 +464,7 @@ public class RecallEngineClient {
             Map<String, List<WriteItem>> groupedItems = new HashMap<>();
             for (WriteItem item : tempList) {
                 // Include callback in the key to group items with same callback together
-                String key = item.instanceId + ":" + item.table + ":" + System.identityHashCode(item.callback);
+                String key = item.instanceId + ":" + item.table + ":" + System.identityHashCode(item.callback)+":" + item.insertMode;
                 groupedItems.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
             }
 
