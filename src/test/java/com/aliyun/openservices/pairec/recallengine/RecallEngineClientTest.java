@@ -116,6 +116,7 @@ public class RecallEngineClientTest {
 
     /**
      * Test partial field update using UPSERT mode with KV table.
+     * Using writeFlush() for synchronous write instead of callbacks.
      * 
      * Table: item_table_test_v4 (KV table, single primary key)
      * Fields:
@@ -125,7 +126,7 @@ public class RecallEngineClientTest {
      *   - list (ARRAY_STRING)
      */
     @Test
-    public void testPartialUpdate() throws InterruptedException {
+    public void testPartialUpdate() {
         String instanceId = System.getenv("RECALL_ENGINE_INSTANCE_ID");
         String tableName = "item_table_test_v4";
 
@@ -135,7 +136,7 @@ public class RecallEngineClientTest {
         insertRequest.setInsertMode(InsertMode.UPSERT);
 
         Map<String, Object> initialData = new HashMap<>();
-        initialData.put("item_id", "item_partial_test_001");
+        initialData.put("item_id", "item_partial_test_002");
         initialData.put("bool_field", true);
         initialData.put("category", "electronics");
         initialData.put("list", java.util.Arrays.asList("tag1", "tag2", "tag3"));
@@ -144,22 +145,12 @@ public class RecallEngineClientTest {
         content.add(initialData);
         insertRequest.setContent(content);
 
-        CountDownLatch initLatch = new CountDownLatch(1);
-        client.write(instanceId, tableName, insertRequest, new WriteCallback() {
-            @Override
-            public void onSuccess(String instId, String table, WriteResponse response) {
-                System.out.println("Initial insert success: " + response.getCode());
-                initLatch.countDown();
-            }
-
-            @Override
-            public void onError(String instId, String table, Exception e) {
-                System.err.println("Initial insert failed: " + e.getMessage());
-                initLatch.countDown();
-            }
-        });
-
-        assertTrue("Initial insert timeout", initLatch.await(5, TimeUnit.SECONDS));
+        WriteResponse initResp = client.write(instanceId, tableName, insertRequest);
+        assertEquals("OK", initResp.getCode());
+        
+        // Flush to ensure data is written
+        client.writeFlush();
+        System.out.println("Initial insert completed");
 
         // Step 2: Partial update - only update category field
         WriteRequest updateRequest = new WriteRequest();
@@ -168,7 +159,7 @@ public class RecallEngineClientTest {
 
         Map<String, Object> partialData = new HashMap<>();
         // Must include primary key to identify the record
-        partialData.put("item_id", "item_partial_test_001");
+        partialData.put("item_id", "item_partial_test_002");
         // Only update category, other fields (bool_field, list) remain unchanged
         partialData.put("category", "home_appliances");
 
@@ -176,27 +167,11 @@ public class RecallEngineClientTest {
         updateContent.add(partialData);
         updateRequest.setContent(updateContent);
 
-        CountDownLatch updateLatch = new CountDownLatch(1);
-        AtomicReference<WriteResponse> updateResponse = new AtomicReference<>();
-
-        client.write(instanceId, tableName, updateRequest, new WriteCallback() {
-            @Override
-            public void onSuccess(String instId, String table, WriteResponse response) {
-                System.out.println("Partial update success: category updated to 'home_appliances'");
-                System.out.println("Response code: " + response.getCode());
-                updateResponse.set(response);
-                updateLatch.countDown();
-            }
-
-            @Override
-            public void onError(String instId, String table, Exception e) {
-                System.err.println("Partial update failed: " + e.getMessage());
-                updateLatch.countDown();
-            }
-        });
-
-        assertTrue("Partial update timeout", updateLatch.await(5, TimeUnit.SECONDS));
-        assertNotNull("Update response should not be null", updateResponse.get());
-        assertEquals("OK", updateResponse.get().getCode());
+        WriteResponse updateResp = client.write(instanceId, tableName, updateRequest);
+        assertEquals("OK", updateResp.getCode());
+        
+        // Flush to ensure partial update is written
+        client.writeFlush();
+        System.out.println("Partial update completed: category updated to 'home_appliances'");
     }
 }
