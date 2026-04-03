@@ -26,10 +26,30 @@ public class RecallEngineClient {
     
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final int DEFAULT_TIMEOUT_MS = 500;
-    
+
+    // 各 region 的公网地址和 token 配置
+    private static final Map<String, String[]> PUBLIC_ENDPOINT_CONFIG = new HashMap<>();
+    static {
+        // key: region, value: [endpoint, token]
+        PUBLIC_ENDPOINT_CONFIG.put("cn-hangzhou", new String[]{
+            "http://1104944991506609.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/recallengine_service",
+            "MTgwY2I4ZDcyMjM5ZTQ4N2NjMGNiMWEzYjUzOTRmNzJhYWM5MTE4MQ=="
+        });
+        PUBLIC_ENDPOINT_CONFIG.put("cn-shenzhen", new String[]{
+            "http://1104944991506609.cn-shenzhen.pai-eas.aliyuncs.com/api/predict/recallengine_service",
+            "MWVjY2ZhYjAxYzliMTZkM2UzMjI2ZjNmOTk1MTU5OTVkNjc3ZmU3Yg=="
+        });
+        PUBLIC_ENDPOINT_CONFIG.put("ap-southeast-5", new String[]{
+            "http://1104944991506609.ap-southeast-5.pai-eas.aliyuncs.com/api/predict/recallengine_service",
+            "MDJmMDhkYmE4ZmJiNmQ2ZTZhYWY0YzczNTFlMTZiNDk3YTQyYzI5ZQ=="
+        });
+    }
+
     private String endpoint;
     private String username;
     private String password;
+    private String region;
+    private boolean usePublicEndpoint = false;
     int retryTimes;
     Map<String, String> requestHeaders;
     private OkHttpClient httpClient;
@@ -78,6 +98,56 @@ public class RecallEngineClient {
     }
     
     /**
+     * Set the region for public endpoint
+     *
+     * @param region the region
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withRegion(String region) {
+        this.region = region;
+        applyPublicEndpointConfig();
+        return this;
+    }
+
+    /**
+     * Set whether to use public endpoint
+     *
+     * @param usePublicEndpoint true to use public endpoint
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withPublicEndpoint(boolean usePublicEndpoint) {
+        this.usePublicEndpoint = usePublicEndpoint;
+        applyPublicEndpointConfig();
+        return this;
+    }
+
+    /**
+     * Apply public endpoint configuration based on region
+     */
+    private void applyPublicEndpointConfig() {
+        if (usePublicEndpoint && region != null) {
+            String[] config = PUBLIC_ENDPOINT_CONFIG.get(region);
+            if (config != null) {
+                this.endpoint = config[0];
+                this.requestHeaders.put("Authorization", config[1]);
+                logger.info("Using public endpoint for region {}: {}", region, endpoint);
+            } else {
+                logger.warn("Unsupported region: {}, available regions: {}",
+                    region, PUBLIC_ENDPOINT_CONFIG.keySet());
+            }
+        }
+    }
+
+    /**
+     * Get supported regions for public endpoint
+     *
+     * @return set of supported region names
+     */
+    public static java.util.Set<String> getSupportedRegions() {
+        return PUBLIC_ENDPOINT_CONFIG.keySet();
+    }
+
+    /**
      * Set the number of retry attempts
      * 
      * @param retryTimes number of retries
@@ -119,6 +189,7 @@ public class RecallEngineClient {
      * @throws RecallEngineException if the request fails
      */
     public RecallResponse recall(RecallRequest request) throws RecallEngineException {
+        validatePublicEndpointConfig();
         if (retryTimes > 0) {
             RecallEngineException lastException = null;
             for (int i = 0; i < retryTimes; i++) {
@@ -195,6 +266,7 @@ public class RecallEngineClient {
      * @return WriteResponse indicating the request was accepted
      */
     public WriteResponse write(String instanceId, String table, WriteRequest request) {
+        validatePublicEndpointConfig();
         startAsyncWriteThread();
 
         if (request == null || request.getContent() == null || request.getContent().isEmpty()) {
@@ -240,6 +312,7 @@ public class RecallEngineClient {
      * @return WriteResponse indicating the request was accepted
      */
     public WriteResponse write(String instanceId, String table, WriteRequest request, WriteCallback callback) {
+        validatePublicEndpointConfig();
         startAsyncWriteThread();
 
         if (request == null || request.getContent() == null || request.getContent().isEmpty()) {
@@ -327,6 +400,28 @@ public class RecallEngineClient {
             authCache = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
         }
         return authCache;
+    }
+
+    /**
+     * Validate public endpoint configuration before making requests
+     *
+     * @throws IllegalStateException if usePublicEndpoint is true but region is not set or not supported
+     */
+    private void validatePublicEndpointConfig() {
+        if (usePublicEndpoint) {
+            if (region == null) {
+                throw new IllegalStateException(
+                    "Region must be set when using public endpoint. " +
+                    "Call withRegion() with one of: " + PUBLIC_ENDPOINT_CONFIG.keySet()
+                );
+            }
+            if (!PUBLIC_ENDPOINT_CONFIG.containsKey(region)) {
+                throw new IllegalStateException(
+                    "Unsupported region: " + region + ". " +
+                    "Supported regions: " + PUBLIC_ENDPOINT_CONFIG.keySet()
+                );
+            }
+        }
     }
 
     // ==================== Async Write Methods ====================

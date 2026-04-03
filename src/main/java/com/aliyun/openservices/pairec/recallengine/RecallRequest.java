@@ -1,6 +1,7 @@
 package com.aliyun.openservices.pairec.recallengine;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,7 +34,10 @@ public class RecallRequest {
     
     @JsonProperty("debug")
     private boolean debug;
-    
+
+    @JsonProperty("retain_fields")
+    private List<String> retainFields;
+
     public RecallRequest() {
     }
     
@@ -107,5 +111,13 @@ public class RecallRequest {
     
     public void setDebug(boolean debug) {
         this.debug = debug;
+    }
+
+    public List<String> getRetainFields() {
+        return retainFields;
+    }
+
+    public void setRetainFields(List<String> retainFields) {
+        this.retainFields = retainFields;
     }
 }
