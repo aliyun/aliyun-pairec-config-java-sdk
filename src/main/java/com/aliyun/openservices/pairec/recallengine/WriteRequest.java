@@ -17,7 +17,7 @@ public class WriteRequest {
     private String versionId;
 
     @JsonProperty("insert_mode")
-    private String insertMode;
+    private InsertMode insertMode = InsertMode.INSERT;
 
     public WriteRequest() {
     }
@@ -46,11 +46,11 @@ public class WriteRequest {
         this.versionId = versionId;
     }
 
-    public String getInsertMode() {
+    public InsertMode getInsertMode() {
         return insertMode;
     }
 
-    public void setInsertMode(String insertMode) {
+    public void setInsertMode(InsertMode insertMode) {
         this.insertMode = insertMode;
     }
 }

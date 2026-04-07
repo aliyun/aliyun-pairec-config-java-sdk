@@ -60,9 +60,9 @@ public class RecallEngineClient {
     private final List<WriteItem> writeData = new ArrayList<>();
     private final ReentrantLock writeLock = new ReentrantLock();
     private final Condition writeCondition = writeLock.newCondition();
-    private ExecutorService writeExecutor;
+    private volatile ExecutorService writeExecutor;
     private volatile boolean running = true;
-    private Thread asyncWriteThread;
+    private volatile Thread asyncWriteThread;
     private int batchSize = 20;
     private long flushIntervalMs = 50;
     private WriteCallback globalCallback;
@@ -278,7 +278,7 @@ public class RecallEngineClient {
         }
 
         int itemCount = request.getContent().size();
-        String insertMode = request.getInsertMode();
+        InsertMode insertMode = request.getInsertMode();
 
         writeLock.lock();
         try {
@@ -324,7 +324,7 @@ public class RecallEngineClient {
         }
 
         int itemCount = request.getContent().size();
-        String insertMode = request.getInsertMode();
+        InsertMode insertMode = request.getInsertMode();
 
         writeLock.lock();
         try {
@@ -471,52 +471,85 @@ public class RecallEngineClient {
     }
 
     /**
-     * Get or create the write executor
+     * Get or create the write executor using Double-Checked Locking for thread safety and performance.
+     * This pattern ensures:
+     * - Thread safety: only one thread creates the executor
+     * - Performance: subsequent calls only need a volatile read (no synchronization)
      */
     private ExecutorService getWriteExecutor() {
-        if (writeExecutor == null || writeExecutor.isShutdown()) {
-            writeExecutor = Executors.newFixedThreadPool(writeThreadPoolSize);
+        ExecutorService executor = writeExecutor;
+        if (executor == null || executor.isShutdown()) {
+            synchronized (this) {
+                executor = writeExecutor;
+                if (executor == null || executor.isShutdown()) {
+                    executor = Executors.newFixedThreadPool(writeThreadPoolSize);
+                    writeExecutor = executor;
+                }
+            }
         }
-        return writeExecutor;
+        return executor;
     }
 
     /**
-     * Start the async write background thread
+     * Start the async write background thread.
+     * Uses Double-Checked Locking for thread safety and performance:
+     * - First check without lock (fast path for most calls)
+     * - Only acquire lock when thread needs to be created
      */
     private void startAsyncWriteThread() {
-        if (asyncWriteThread != null && asyncWriteThread.isAlive()) {
+        // Fast path: if thread is already running, return immediately (no lock needed)
+        Thread thread = asyncWriteThread;
+        if (thread != null && thread.isAlive()) {
             return;
         }
 
-        String threadName = "RecallEngineAsyncWriter";
-        asyncWriteThread = new Thread(() -> {
-            while (running) {
+        // Slow path: need to create thread, use synchronized
+        synchronized (this) {
+            // Double-check after acquiring lock
+            thread = asyncWriteThread;
+            if (thread != null && thread.isAlive()) {
+                return;
+            }
+
+            String threadName = "RecallEngineAsyncWriter";
+            asyncWriteThread = new Thread(() -> {
+                while (running) {
+                    writeLock.lock();
+                    try {
+                        writeCondition.await(flushIntervalMs, TimeUnit.MILLISECONDS);
+                        if (!writeData.isEmpty()) {
+                            doAsyncWrite();
+                        }
+                    } catch (InterruptedException e) {
+                        logger.warn("{} interrupted, flushing remaining data before exit", threadName);
+                        Thread.currentThread().interrupt();
+                        // Flush remaining data before exit
+                        try {
+                            if (!writeData.isEmpty()) {
+                                doAsyncWrite();
+                            }
+                        } catch (Exception ex) {
+                            logger.error("Failed to flush data on interrupt", ex);
+                        }
+                        break;
+                    } finally {
+                        writeLock.unlock();
+                    }
+                }
+                // Handle remaining data after thread stops
                 writeLock.lock();
                 try {
-                    writeCondition.await(flushIntervalMs, TimeUnit.MILLISECONDS);
                     if (!writeData.isEmpty()) {
                         doAsyncWrite();
                     }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
                 } finally {
                     writeLock.unlock();
                 }
-            }
-            // Handle remaining data after thread stops
-            writeLock.lock();
-            try {
-                if (!writeData.isEmpty()) {
-                    doAsyncWrite();
-                }
-            } finally {
-                writeLock.unlock();
-            }
-            logger.info(threadName + " has stopped.");
-        }, threadName);
-        asyncWriteThread.setDaemon(true);
-        asyncWriteThread.start();
+                logger.info("{} has stopped.", threadName);
+            }, threadName);
+            asyncWriteThread.setDaemon(true);
+            asyncWriteThread.start();
+        }
     }
 
     /**
@@ -555,19 +588,19 @@ public class RecallEngineClient {
         writeData.clear();
 
         return getWriteExecutor().submit(() -> {
-            // Group by instanceId, table, callback, and insertMode
-            Map<String, List<WriteItem>> groupedItems = new HashMap<>();
+            // Group by instanceId, table, callback, and insertMode using a composite key object
+            Map<GroupKey, List<WriteItem>> groupedItems = new HashMap<>();
             for (WriteItem item : tempList) {
-                // Include callback in the key to group items with same callback together
-                String key = item.instanceId + ":" + item.table + ":" + System.identityHashCode(item.callback)+":" + item.insertMode;
+                GroupKey key = new GroupKey(item.instanceId, item.table, 
+                                            System.identityHashCode(item.callback), item.insertMode);
                 groupedItems.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
             }
 
             // Write each group
-            for (Map.Entry<String, List<WriteItem>> entry : groupedItems.entrySet()) {
-                String[] parts = entry.getKey().split(":", 3);
-                String instanceId = parts[0];
-                String table = parts[1];
+            for (Map.Entry<GroupKey, List<WriteItem>> entry : groupedItems.entrySet()) {
+                GroupKey key = entry.getKey();
+                String instanceId = key.instanceId;
+                String table = key.table;
                 List<WriteItem> items = entry.getValue();
 
                 // Get callback from first item (all items in group have same callback)
@@ -594,18 +627,18 @@ public class RecallEngineClient {
                         try {
                             callback.onSuccess(instanceId, table, response);
                         } catch (Exception e) {
-                            logger.error("Callback onError raised exception: {}", e.getMessage());
+                            logger.error("Callback onSuccess raised exception", e);
                         }
                     }
                 } catch (Exception e) {
-                    logger.error("Async write failed for {}/{}: {}", instanceId, table, e.getMessage());
+                    logger.error("Async write failed for {}/{}: {}", instanceId, table, e.getMessage(), e);
 
                     // Invoke error callback
                     if (callback != null) {
                         try {
                             callback.onError(instanceId, table, e);
                         } catch (Exception ex) {
-                            logger.error("Callback onError raised exception: {}", ex.getMessage());
+                            logger.error("Callback onError raised exception", ex);
                         }
                     }
                 }
@@ -659,25 +692,49 @@ public class RecallEngineClient {
         final String instanceId;
         final String table;
         final Map<String, Object> data;
-        final long timestamp;
         final WriteCallback callback;
-        final String insertMode;
+        final InsertMode insertMode;
 
-        WriteItem(String instanceId, String table, Map<String, Object> data) {
-            this(instanceId, table, data, null, null);
-        }
-
-        WriteItem(String instanceId, String table, Map<String, Object> data, WriteCallback callback) {
-            this(instanceId, table, data, callback, null);
-        }
-
-        WriteItem(String instanceId, String table, Map<String, Object> data, WriteCallback callback, String insertMode) {
+        WriteItem(String instanceId, String table, Map<String, Object> data, WriteCallback callback, InsertMode insertMode) {
             this.instanceId = instanceId;
             this.table = table;
             this.data = data;
-            this.timestamp = System.currentTimeMillis();
             this.callback = callback;
             this.insertMode = insertMode;
+        }
+    }
+
+    /**
+     * Internal class for grouping write items by instanceId, table, callback, and insertMode.
+     * Using a proper key object avoids string parsing issues when instanceId or table contains ":".
+     */
+    private static class GroupKey {
+        final String instanceId;
+        final String table;
+        final int callbackHash;
+        final InsertMode insertMode;
+
+        GroupKey(String instanceId, String table, int callbackHash, InsertMode insertMode) {
+            this.instanceId = instanceId;
+            this.table = table;
+            this.callbackHash = callbackHash;
+            this.insertMode = insertMode;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            GroupKey groupKey = (GroupKey) o;
+            return callbackHash == groupKey.callbackHash &&
+                   java.util.Objects.equals(instanceId, groupKey.instanceId) &&
+                   java.util.Objects.equals(table, groupKey.table) &&
+                   insertMode == groupKey.insertMode;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(instanceId, table, callbackHash, insertMode);
         }
     }
 }
