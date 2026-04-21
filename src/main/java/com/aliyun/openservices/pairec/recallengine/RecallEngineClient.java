@@ -63,7 +63,7 @@ public class RecallEngineClient {
     private volatile ExecutorService writeExecutor;
     private volatile boolean running = true;
     private volatile Thread asyncWriteThread;
-    private int batchSize = 20;
+    private int batchSize = 0;
     private long flushIntervalMs = 50;
     private WriteCallback globalCallback;
     private int writeThreadPoolSize = 4;
@@ -348,35 +348,35 @@ public class RecallEngineClient {
     private WriteResponse doWrite(String instanceId, String table, WriteRequest request) throws RecallEngineException {
         try {
             String json = objectMapper.writeValueAsString(request);
-            
+
             String url = String.format("%s/api/v1/tables/%s/default/%s/write", endpoint, instanceId, table);
             RequestBody body = RequestBody.create(json, JSON);
-            
+
             Request.Builder requestBuilder = new Request.Builder()
                     .url(url)
                     .post(body)
                     .header("Content-Type", "application/json")
                     .header("Auth", buildAuth());
-            
+
             // Add custom headers
             for (Map.Entry<String, String> entry : requestHeaders.entrySet()) {
                 requestBuilder.header(entry.getKey(), entry.getValue());
             }
-            
+
             try (okhttp3.Response response = httpClient.newCall(requestBuilder.build()).execute()) {
                 if (response.body() == null) {
                     throw new RecallEngineException("Empty response body");
                 }
-                
+
                 String responseBody = response.body().string();
-                
+
                 if (response.code() != 200) {
                     String errorMsg = "write request failed, response status code: " + response.code();
                     try {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> errorMap = objectMapper.readValue(responseBody, Map.class);
                         if (errorMap.containsKey("message")) {
-                            errorMsg = "write request failed, response status code: " + response.code() + 
+                            errorMsg = "write request failed, response status code: " + response.code() +
                                        ", message: " + errorMap.get("message");
                         }
                     } catch (Exception e) {
@@ -384,13 +384,82 @@ public class RecallEngineClient {
                     }
                     throw new RecallEngineException(errorMsg);
                 }
-                
+
                 return objectMapper.readValue(responseBody, WriteResponse.class);
             }
         } catch (RecallEngineException e) {
             throw e;
         } catch (Exception e) {
             throw new RecallEngineException("Write request failed", e);
+        }
+    }
+
+    // ==================== Delete Methods ====================
+
+    /**
+     * Delete data from a table
+     * This is a synchronous operation.
+     *
+     * @param instanceId the instance ID
+     * @param table the table name
+     * @param request the delete request containing primary key conditions
+     * @return WriteResponse indicating the result
+     * @throws RecallEngineException if the request fails
+     */
+    public WriteResponse delete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
+        validatePublicEndpointConfig();
+        return doDelete(instanceId, table, request);
+    }
+
+    private WriteResponse doDelete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
+        try {
+            // Validate request
+            request.validate();
+
+            String json = objectMapper.writeValueAsString(request);
+
+            String url = String.format("%s/api/v1/tables/%s/%s/%s/delete_records", endpoint, instanceId, request.getSchema(), table);
+            RequestBody body = RequestBody.create(json, JSON);
+
+            Request.Builder requestBuilder = new Request.Builder()
+                    .url(url)
+                    .post(body)
+                    .header("Content-Type", "application/json")
+                    .header("Auth", buildAuth());
+
+            // Add custom headers
+            for (Map.Entry<String, String> entry : requestHeaders.entrySet()) {
+                requestBuilder.header(entry.getKey(), entry.getValue());
+            }
+
+            try (okhttp3.Response response = httpClient.newCall(requestBuilder.build()).execute()) {
+                if (response.body() == null) {
+                    throw new RecallEngineException("Empty response body");
+                }
+
+                String responseBody = response.body().string();
+
+                if (response.code() != 200) {
+                    String errorMsg = "delete request failed, response status code: " + response.code();
+                    try {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> errorMap = objectMapper.readValue(responseBody, Map.class);
+                        if (errorMap.containsKey("message")) {
+                            errorMsg = "delete request failed, response status code: " + response.code() +
+                                       ", message: " + errorMap.get("message");
+                        }
+                    } catch (Exception e) {
+                        logger.debug("Failed to parse error response", e);
+                    }
+                    throw new RecallEngineException(errorMsg);
+                }
+
+                return objectMapper.readValue(responseBody, WriteResponse.class);
+            }
+        } catch (RecallEngineException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RecallEngineException("Delete request failed", e);
         }
     }
     
