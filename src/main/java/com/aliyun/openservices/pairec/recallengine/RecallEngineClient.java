@@ -63,7 +63,7 @@ public class RecallEngineClient {
     private volatile ExecutorService writeExecutor;
     private volatile boolean running = true;
     private volatile Thread asyncWriteThread;
-    private int batchSize = 0;
+    private int batchSize = 20;
     private long flushIntervalMs = 50;
     private WriteCallback globalCallback;
     private int writeThreadPoolSize = 4;
