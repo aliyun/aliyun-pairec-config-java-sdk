@@ -403,15 +403,15 @@ public class RecallEngineClient {
      * @param instanceId the instance ID
      * @param table the table name
      * @param request the delete request containing primary key conditions
-     * @return WriteResponse indicating the result
+     * @return DeleteResponse indicating the result
      * @throws RecallEngineException if the request fails
      */
-    public WriteResponse delete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
+    public DeleteResponse delete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
         validatePublicEndpointConfig();
         return doDelete(instanceId, table, request);
     }
 
-    private WriteResponse doDelete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
+    private DeleteResponse doDelete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
         try {
             // Validate request
             request.validate();
@@ -454,7 +454,7 @@ public class RecallEngineClient {
                     throw new RecallEngineException(errorMsg);
                 }
 
-                return objectMapper.readValue(responseBody, WriteResponse.class);
+                return objectMapper.readValue(responseBody, DeleteResponse.class);
             }
         } catch (RecallEngineException e) {
             throw e;
