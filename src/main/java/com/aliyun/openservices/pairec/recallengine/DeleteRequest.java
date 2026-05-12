@@ -30,6 +30,7 @@ public class DeleteRequest {
     /**
      * Schema name (default: "default")
      */
+    @JsonProperty("schema")
     private String schema = "default";
 
     public DeleteRequest() {

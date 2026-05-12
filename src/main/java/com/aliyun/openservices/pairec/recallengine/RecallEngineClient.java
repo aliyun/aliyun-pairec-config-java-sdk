@@ -1,16 +1,18 @@
 package com.aliyun.openservices.pairec.recallengine;
 
+import com.aliyun.pairecservice20221213.Client;
+import com.aliyun.pairecservice20221213.models.GetRecallManagementConfigRequest;
+import com.aliyun.pairecservice20221213.models.GetRecallManagementConfigResponse;
+import com.aliyun.pairecservice20221213.models.GetRecallManagementConfigResponseBody;
+import com.aliyun.teaopenapi.models.Config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -27,31 +29,17 @@ public class RecallEngineClient {
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final int DEFAULT_TIMEOUT_MS = 500;
 
-    // 各 region 的公网地址和 token 配置
-    private static final Map<String, String[]> PUBLIC_ENDPOINT_CONFIG = new HashMap<>();
-    static {
-        // key: region, value: [endpoint, token]
-        PUBLIC_ENDPOINT_CONFIG.put("cn-hangzhou", new String[]{
-            "http://1104944991506609.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/recallengine_service",
-            "MTgwY2I4ZDcyMjM5ZTQ4N2NjMGNiMWEzYjUzOTRmNzJhYWM5MTE4MQ=="
-        });
-        PUBLIC_ENDPOINT_CONFIG.put("cn-shenzhen", new String[]{
-            "http://1104944991506609.cn-shenzhen.pai-eas.aliyuncs.com/api/predict/recallengine_service",
-            "MWVjY2ZhYjAxYzliMTZkM2UzMjI2ZjNmOTk1MTU5OTVkNjc3ZmU3Yg=="
-        });
-        PUBLIC_ENDPOINT_CONFIG.put("ap-southeast-5", new String[]{
-            "http://1104944991506609.ap-southeast-5.pai-eas.aliyuncs.com/api/predict/recallengine_service",
-            "MDJmMDhkYmE4ZmJiNmQ2ZTZhYWY0YzczNTFlMTZiNDk3YTQyYzI5ZQ=="
-        });
-    }
-
-    private String endpoint;
+    private volatile String endpoint;
     private String username;
     private String password;
     private String region;
-    private boolean usePublicEndpoint = false;
+    private String instanceId;
+    private String accessKeyId;
+    private String accessKeySecret;
+    private volatile boolean usePublicEndpoint = false;
+    private volatile boolean publicEndpointFetched = false;
     int retryTimes;
-    Map<String, String> requestHeaders;
+    final Map<String, String> requestHeaders;
     private OkHttpClient httpClient;
     private String authCache;
     private ObjectMapper objectMapper;
@@ -80,7 +68,7 @@ public class RecallEngineClient {
         this.username = username;
         this.password = password;
         this.retryTimes = 0;
-        this.requestHeaders = new HashMap<>();
+        this.requestHeaders = new ConcurrentHashMap<>();
         this.objectMapper = new ObjectMapper();
         
         // Ensure endpoint has schema
@@ -98,53 +86,124 @@ public class RecallEngineClient {
     }
     
     /**
-     * Set the region for public endpoint
+     * Set the region for the client
      *
      * @param region the region
      * @return this client for method chaining
      */
     public RecallEngineClient withRegion(String region) {
         this.region = region;
-        applyPublicEndpointConfig();
+        this.publicEndpointFetched = false;
         return this;
     }
 
     /**
-     * Set whether to use public endpoint
+     * Set the instance ID for public endpoint resolution
+     *
+     * @param instanceId the instance ID
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withInstanceId(String instanceId) {
+        this.instanceId = instanceId;
+        this.publicEndpointFetched = false;
+        return this;
+    }
+
+    /**
+     * Set the AccessKey ID for OpenAPI authentication
+     *
+     * @param accessKeyId the AccessKey ID
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withAccessKeyId(String accessKeyId) {
+        this.accessKeyId = accessKeyId;
+        return this;
+    }
+
+    /**
+     * Set the AccessKey Secret for OpenAPI authentication
+     *
+     * @param accessKeySecret the AccessKey Secret
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withAccessKeySecret(String accessKeySecret) {
+        this.accessKeySecret = accessKeySecret;
+        return this;
+    }
+
+    /**
+     * Set whether to use public endpoint.
+     * When enabled, the client will call getRecallManagementConfig OpenAPI
+     * to fetch the public endpoint and token.
      *
      * @param usePublicEndpoint true to use public endpoint
      * @return this client for method chaining
      */
     public RecallEngineClient withPublicEndpoint(boolean usePublicEndpoint) {
         this.usePublicEndpoint = usePublicEndpoint;
-        applyPublicEndpointConfig();
+        this.publicEndpointFetched = false;
         return this;
     }
 
     /**
-     * Apply public endpoint configuration based on region
+     * Fetch public endpoint and token from getRecallManagementConfig OpenAPI
      */
-    private void applyPublicEndpointConfig() {
-        if (usePublicEndpoint && region != null) {
-            String[] config = PUBLIC_ENDPOINT_CONFIG.get(region);
-            if (config != null) {
-                this.endpoint = config[0];
-                this.requestHeaders.put("Authorization", config[1]);
-                logger.info("Using public endpoint for region {}: {}", region, endpoint);
-            } else {
-                logger.warn("Unsupported region: {}, available regions: {}",
-                    region, PUBLIC_ENDPOINT_CONFIG.keySet());
+    private void fetchPublicEndpointConfig() {
+        if (!usePublicEndpoint || region == null || region.isEmpty() || instanceId == null || instanceId.isEmpty()) {
+            return;
+        }
+        if (publicEndpointFetched) {
+            return;
+        }
+        synchronized (this) {
+            if (publicEndpointFetched) {
+                return;
+            }
+            try {
+                Config config = new Config();
+                config.setAccessKeyId(accessKeyId);
+                config.setAccessKeySecret(accessKeySecret);
+                config.setRegionId(region);
+                config.setEndpoint("pairecservice." + region + ".aliyuncs.com");
+
+                logger.info("Fetching public endpoint config: region={}, instanceId={}, endpoint={}",
+                    region, instanceId, config.getEndpoint());
+
+                Client apiClient = new Client(config);
+                GetRecallManagementConfigRequest request = new GetRecallManagementConfigRequest();
+                request.setInstanceId(instanceId);
+
+                GetRecallManagementConfigResponse response = apiClient.getRecallManagementConfig(request);
+                GetRecallManagementConfigResponseBody body = response.getBody();
+
+                logger.debug("getRecallManagementConfig response: statusCode={}, body={}",
+                    response.getStatusCode(), body);
+
+                if (body != null && body.getNetworkConfigs() != null && !body.getNetworkConfigs().isEmpty()) {
+                    for (GetRecallManagementConfigResponseBody.GetRecallManagementConfigResponseBodyNetworkConfigs networkConfig : body.getNetworkConfigs()) {
+                        logger.info("NetworkConfig: publicEndpoint={}, token={}, status={}, privateLinkAddress={}",
+                            networkConfig.getPublicEndpoint(),
+                            networkConfig.getToken() != null ? "***(length=" + networkConfig.getToken().length() + ")" : "null",
+                            networkConfig.getStatus(),
+                            networkConfig.getPrivateLinkAddress());
+                        if (networkConfig.getPublicEndpoint() != null && !networkConfig.getPublicEndpoint().isEmpty()) {
+                            this.endpoint = networkConfig.getPublicEndpoint();
+                            if (networkConfig.getToken() != null) {
+                                this.requestHeaders.put("Authorization", networkConfig.getToken());
+                            }
+                            this.publicEndpointFetched = true;
+                            logger.info("Fetched public endpoint for region {}: {}", region, endpoint);
+                            return;
+                        }
+                    }
+                    logger.warn("No public endpoint found in networkConfigs for instance {}", instanceId);
+                } else {
+                    logger.warn("Empty networkConfigs returned for instance {}", instanceId);
+                }
+            } catch (Exception e) {
+                logger.error("Failed to fetch public endpoint config: {}", e.getMessage(), e);
             }
         }
-    }
-
-    /**
-     * Get supported regions for public endpoint
-     *
-     * @return set of supported region names
-     */
-    public static java.util.Set<String> getSupportedRegions() {
-        return PUBLIC_ENDPOINT_CONFIG.keySet();
     }
 
     /**
@@ -346,52 +405,8 @@ public class RecallEngineClient {
     }
     
     private WriteResponse doWrite(String instanceId, String table, WriteRequest request) throws RecallEngineException {
-        try {
-            String json = objectMapper.writeValueAsString(request);
-
-            String url = String.format("%s/api/v1/tables/%s/default/%s/write", endpoint, instanceId, table);
-            RequestBody body = RequestBody.create(json, JSON);
-
-            Request.Builder requestBuilder = new Request.Builder()
-                    .url(url)
-                    .post(body)
-                    .header("Content-Type", "application/json")
-                    .header("Auth", buildAuth());
-
-            // Add custom headers
-            for (Map.Entry<String, String> entry : requestHeaders.entrySet()) {
-                requestBuilder.header(entry.getKey(), entry.getValue());
-            }
-
-            try (okhttp3.Response response = httpClient.newCall(requestBuilder.build()).execute()) {
-                if (response.body() == null) {
-                    throw new RecallEngineException("Empty response body");
-                }
-
-                String responseBody = response.body().string();
-
-                if (response.code() != 200) {
-                    String errorMsg = "write request failed, response status code: " + response.code();
-                    try {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> errorMap = objectMapper.readValue(responseBody, Map.class);
-                        if (errorMap.containsKey("message")) {
-                            errorMsg = "write request failed, response status code: " + response.code() +
-                                       ", message: " + errorMap.get("message");
-                        }
-                    } catch (Exception e) {
-                        logger.debug("Failed to parse error response", e);
-                    }
-                    throw new RecallEngineException(errorMsg);
-                }
-
-                return objectMapper.readValue(responseBody, WriteResponse.class);
-            }
-        } catch (RecallEngineException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RecallEngineException("Write request failed", e);
-        }
+        String url = String.format("%s/api/v1/tables/%s/default/%s/write", endpoint, instanceId, table);
+        return doPost(url, request, "write", WriteResponse.class);
     }
 
     // ==================== Delete Methods ====================
@@ -408,17 +423,42 @@ public class RecallEngineClient {
      */
     public DeleteResponse delete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
         validatePublicEndpointConfig();
-        return doDelete(instanceId, table, request);
+        request.validate();
+
+        if (retryTimes > 0) {
+            RecallEngineException lastException = null;
+            for (int i = 0; i < retryTimes; i++) {
+                try {
+                    return doDelete(instanceId, table, request);
+                } catch (RecallEngineException e) {
+                    lastException = e;
+                    logger.warn("recallengine: delete failed, retrying..., err: {}", e.getMessage());
+                }
+            }
+            throw lastException;
+        } else {
+            return doDelete(instanceId, table, request);
+        }
     }
 
     private DeleteResponse doDelete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
+        String url = String.format("%s/api/v1/tables/%s/%s/%s/delete_records", endpoint, instanceId, request.getSchema(), table);
+        return doPost(url, request, "delete", DeleteResponse.class);
+    }
+
+    /**
+     * Common POST request method
+     *
+     * @param url the request URL
+     * @param payload the request body object
+     * @param operationName operation name for error messages
+     * @param responseClass the response type to deserialize into
+     * @return the deserialized response
+     * @throws RecallEngineException if the request fails
+     */
+    private <T> T doPost(String url, Object payload, String operationName, Class<T> responseClass) throws RecallEngineException {
         try {
-            // Validate request
-            request.validate();
-
-            String json = objectMapper.writeValueAsString(request);
-
-            String url = String.format("%s/api/v1/tables/%s/%s/%s/delete_records", endpoint, instanceId, request.getSchema(), table);
+            String json = objectMapper.writeValueAsString(payload);
             RequestBody body = RequestBody.create(json, JSON);
 
             Request.Builder requestBuilder = new Request.Builder()
@@ -427,7 +467,6 @@ public class RecallEngineClient {
                     .header("Content-Type", "application/json")
                     .header("Auth", buildAuth());
 
-            // Add custom headers
             for (Map.Entry<String, String> entry : requestHeaders.entrySet()) {
                 requestBuilder.header(entry.getKey(), entry.getValue());
             }
@@ -440,12 +479,12 @@ public class RecallEngineClient {
                 String responseBody = response.body().string();
 
                 if (response.code() != 200) {
-                    String errorMsg = "delete request failed, response status code: " + response.code();
+                    String errorMsg = operationName + " request failed, response status code: " + response.code();
                     try {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> errorMap = objectMapper.readValue(responseBody, Map.class);
                         if (errorMap.containsKey("message")) {
-                            errorMsg = "delete request failed, response status code: " + response.code() +
+                            errorMsg = operationName + " request failed, response status code: " + response.code() +
                                        ", message: " + errorMap.get("message");
                         }
                     } catch (Exception e) {
@@ -454,12 +493,12 @@ public class RecallEngineClient {
                     throw new RecallEngineException(errorMsg);
                 }
 
-                return objectMapper.readValue(responseBody, DeleteResponse.class);
+                return objectMapper.readValue(responseBody, responseClass);
             }
         } catch (RecallEngineException e) {
             throw e;
         } catch (Exception e) {
-            throw new RecallEngineException("Delete request failed", e);
+            throw new RecallEngineException(operationName + " request failed", e);
         }
     }
     
@@ -474,20 +513,32 @@ public class RecallEngineClient {
     /**
      * Validate public endpoint configuration before making requests
      *
-     * @throws IllegalStateException if usePublicEndpoint is true but region is not set or not supported
+     * @throws IllegalStateException if usePublicEndpoint is true but required config is missing
      */
     private void validatePublicEndpointConfig() {
         if (usePublicEndpoint) {
-            if (region == null) {
+            if (region == null || region.isEmpty()) {
                 throw new IllegalStateException(
-                    "Region must be set when using public endpoint. " +
-                    "Call withRegion() with one of: " + PUBLIC_ENDPOINT_CONFIG.keySet()
+                    "Region must be set when using public endpoint. Call withRegion() to set the region."
                 );
             }
-            if (!PUBLIC_ENDPOINT_CONFIG.containsKey(region)) {
+            if (instanceId == null || instanceId.isEmpty()) {
                 throw new IllegalStateException(
-                    "Unsupported region: " + region + ". " +
-                    "Supported regions: " + PUBLIC_ENDPOINT_CONFIG.keySet()
+                    "InstanceId must be set when using public endpoint. Call withInstanceId() to set the instance ID."
+                );
+            }
+            if (accessKeyId == null || accessKeyId.isEmpty() || accessKeySecret == null || accessKeySecret.isEmpty()) {
+                throw new IllegalStateException(
+                    "AccessKeyId and AccessKeySecret must be set when using public endpoint. " +
+                    "Call withAccessKeyId() and withAccessKeySecret() to set them."
+                );
+            }
+            if (!publicEndpointFetched) {
+                fetchPublicEndpointConfig();
+            }
+            if (!publicEndpointFetched) {
+                throw new IllegalStateException(
+                    "Failed to fetch public endpoint config for region: " + region + ", instanceId: " + instanceId
                 );
             }
         }
