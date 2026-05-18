@@ -7,7 +7,7 @@ Java sdk for PA-REC config server. Aliyun product [link](https://pairec.console.
 <dependency>
   <groupId>com.aliyun.openservices.aiservice</groupId>
   <artifactId>pairec-sdk</artifactId>
-  <version>1.0.8</version>
+  <version>1.0.9</version>
 </dependency>
 ```
 
@@ -66,11 +66,15 @@ public class ExperimentTest {
 
 ```
 ## 版本说明
+1.0.9 (2026-05-18)
+* 公网调用链路优化
+* recall engine delete api 支持
+
 1.0.8 (2026-03-23)
 * 支持InsertMode更新数据，upsert 部分更新字段功能支持KV类型的表
 * write 写入接口支持异步写入
 
-  1.0.7 (2026-02-03)
+1.0.7 (2026-02-03)
 * 召回管理client发布 
 
 1.0.6 (2025-11-17)
