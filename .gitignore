@@ -3,3 +3,4 @@
 /src/test/resources/
 /.vscode/
 /.worktrees/
+dependency-reduced-pom.xml
