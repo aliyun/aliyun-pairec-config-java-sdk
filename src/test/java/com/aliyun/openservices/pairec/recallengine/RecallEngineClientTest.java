@@ -20,15 +20,25 @@ public class RecallEngineClientTest {
 
     @Before
     public void setUp() {
-        String endpoint = System.getenv("RECALL_ENGINE_SERVICE_ENDPOINT");
+        //String endpoint = System.getenv("RECALL_ENGINE_SERVICE_ENDPOINT");
         String username = System.getenv("RECALL_ENGINE_SERVICE_USERNAME");
         String password = System.getenv("RECALL_ENGINE_SERVICE_PASSWORD");
-        String token = System.getenv("RECALL_ENGINE_SERVICE_TOKEN");
+        String instanceId = System.getenv("RECALL_ENGINE_INSTANCE_ID");
+        String accessKeyId = System.getenv("ACCESS_ID");
+        String accessKeySecret = System.getenv("ACCESS_KEY");
+        //String token = System.getenv("RECALL_ENGINE_SERVICE_TOKEN");
 
         // 使用测试环境配置
-        client = new RecallEngineClient(endpoint, username, password);
+        // use public endpoint for test
+        client = new RecallEngineClient("", username, password);
 
-        client.withRetryTimes(2).withRequestHeader("Authorization", token);
+        client.withRetryTimes(2)
+                .withOpenApiEndpoint("pairecservice-pre.cn-hangzhou.aliyuncs.com")
+                .withRegion("cn-hangzhou")
+                .withInstanceId(instanceId)
+                .withAccessKeyId(accessKeyId)
+                .withAccessKeySecret(accessKeySecret)
+                .withPublicEndpoint(true);
 
         assertNotNull(client);
     }
@@ -67,8 +77,8 @@ public class RecallEngineClientTest {
         request.setRequestId("write-req-123");
 
         Map<String, Object> item = new HashMap<>();
-        item.put("user_id", "123");
-        item.put("item_id", "item_15");
+        item.put("user_id", "124");
+        item.put("item_id", "item_16");
         item.put("score", 0.16);
 
         java.util.List<Map<String, Object>> content = new java.util.ArrayList<>();
@@ -169,9 +179,24 @@ public class RecallEngineClientTest {
 
         WriteResponse updateResp = client.write(instanceId, tableName, updateRequest);
         assertEquals("OK", updateResp.getCode());
-        
+
         // Flush to ensure partial update is written
         client.writeFlush();
         System.out.println("Partial update completed: category updated to 'home_appliances'");
+    }
+
+    @Test
+    public void testDeleteWithVersion() throws RecallEngineException {
+        String instanceId = System.getenv("RECALL_ENGINE_INSTANCE_ID");
+        String tableName = "test_u2i";
+
+        DeleteRequest deleteRequest = new DeleteRequest();
+        deleteRequest.setKeys(java.util.Arrays.asList("123", "124"));
+
+        DeleteResponse deleteResp = client.delete(instanceId, tableName, deleteRequest);
+        System.out.println("Delete with version response: " + deleteResp.getCode() + ", " + deleteResp.getMessage());
+
+        assertNotNull(deleteResp);
+        assertEquals("OK", deleteResp.getCode());
     }
 }

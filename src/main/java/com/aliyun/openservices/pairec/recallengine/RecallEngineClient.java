@@ -36,6 +36,7 @@ public class RecallEngineClient {
     private String instanceId;
     private String accessKeyId;
     private String accessKeySecret;
+    private String openApiEndpoint;
     private volatile boolean usePublicEndpoint = false;
     private volatile boolean publicEndpointFetched = false;
     int retryTimes;
@@ -127,6 +128,19 @@ public class RecallEngineClient {
     }
 
     /**
+     * Set the OpenAPI endpoint used to fetch public endpoint config.
+     * When not set, defaults to "pairecservice.{region}.aliyuncs.com".
+     *
+     * @param openApiEndpoint the OpenAPI endpoint, e.g. "pairecservice.cn-hangzhou.aliyuncs.com"
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withOpenApiEndpoint(String openApiEndpoint) {
+        this.openApiEndpoint = openApiEndpoint;
+        this.publicEndpointFetched = false;
+        return this;
+    }
+
+    /**
      * Set whether to use public endpoint.
      * When enabled, the client will call getRecallManagementConfig OpenAPI
      * to fetch the public endpoint and token.
@@ -159,7 +173,9 @@ public class RecallEngineClient {
                 config.setAccessKeyId(accessKeyId);
                 config.setAccessKeySecret(accessKeySecret);
                 config.setRegionId(region);
-                config.setEndpoint("pairecservice." + region + ".aliyuncs.com");
+                config.setEndpoint(openApiEndpoint != null && !openApiEndpoint.isEmpty()
+                    ? openApiEndpoint
+                    : "pairecservice." + region + ".aliyuncs.com");
 
                 logger.info("Fetching public endpoint config: region={}, instanceId={}, endpoint={}",
                     region, instanceId, config.getEndpoint());
