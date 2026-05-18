@@ -28,10 +28,15 @@ public class DeleteRequest {
     private String versionId;
 
     /**
+     * Default schema name used when none is specified
+     */
+    public static final String DEFAULT_SCHEMA = "default";
+
+    /**
      * Schema name (default: "default")
      */
     @JsonProperty("schema")
-    private String schema = "default";
+    private String schema = DEFAULT_SCHEMA;
 
     public DeleteRequest() {
     }
@@ -109,12 +114,13 @@ public class DeleteRequest {
     }
 
     /**
-     * Set the schema name
+     * Set the schema name. If {@code null} or empty is supplied, the schema is
+     * reset to {@link #DEFAULT_SCHEMA} to avoid producing malformed request URLs.
      *
      * @param schema the schema name
      */
     public void setSchema(String schema) {
-        this.schema = schema;
+        this.schema = (schema == null || schema.isEmpty()) ? DEFAULT_SCHEMA : schema;
     }
 
     /**
