@@ -390,7 +390,7 @@ public class RecallEngineClient {
                     // Execute actual HTTP call with retry
                     if (retryTimes > 0) {
                         RecallEngineException lastException = null;
-                        for (int i = 0; i <= retryTimes; i++) {
+                        for (int i = 0; i < retryTimes; i++) {
                             try {
                                 doWrite(instId, tbl, req);
                                 lastException = null;
