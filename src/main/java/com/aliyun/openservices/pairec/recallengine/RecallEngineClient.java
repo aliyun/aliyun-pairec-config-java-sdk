@@ -290,13 +290,22 @@ public class RecallEngineClient {
         return executor;
     }
 
+    /**
+     * Start the async write background thread.
+     * Uses Double-Checked Locking for thread safety and performance:
+     * - First check without lock (fast path for most calls)
+     * - Only acquire lock when thread needs to be created
+     */
     private void startAsyncWriteThread() {
+        // Fast path: if thread is already running, return immediately (no lock needed)
         Thread thread = asyncWriteThread;
         if (thread != null && thread.isAlive()) {
             return;
         }
 
+        // Slow path: need to create thread, use synchronized
         synchronized (this) {
+            // Double-check after acquiring lock
             thread = asyncWriteThread;
             if (thread != null && thread.isAlive()) {
                 return;
@@ -307,19 +316,27 @@ public class RecallEngineClient {
                 while (running) {
                     writeLock.lock();
                     try {
-                        // Wait for timeout or signal
                         writeCondition.await(flushIntervalMs, TimeUnit.MILLISECONDS);
                         if (!writeData.isEmpty()) {
                             doAsyncWrite();
                         }
                     } catch (InterruptedException e) {
+                        logger.warn("{} interrupted, flushing remaining data before exit", threadName);
                         Thread.currentThread().interrupt();
+                        // Flush remaining data before exit
+                        try {
+                            if (!writeData.isEmpty()) {
+                                doAsyncWrite();
+                            }
+                        } catch (Exception ex) {
+                            logger.error("Failed to flush data on interrupt", ex);
+                        }
                         break;
                     } finally {
                         writeLock.unlock();
                     }
                 }
-                // Final flush
+                // Handle remaining data after thread stops
                 writeLock.lock();
                 try {
                     if (!writeData.isEmpty()) {
@@ -328,6 +345,7 @@ public class RecallEngineClient {
                 } finally {
                     writeLock.unlock();
                 }
+                logger.info("{} has stopped.", threadName);
             }, threadName);
             asyncWriteThread.setDaemon(true);
             asyncWriteThread.start();
@@ -341,12 +359,13 @@ public class RecallEngineClient {
         writeLock.lock();
         try {
             if (!writeData.isEmpty()) {
+                logger.info("Write flush: {} items pending", writeData.size());
                 Future<?> future = doAsyncWrite();
                 if (future != null) {
                     try {
-                        future.get(5, TimeUnit.SECONDS);
+                        future.get();
                     } catch (Exception e) {
-                        logger.error("Flush wait error", e);
+                        logger.error("Error waiting for write completion: {}", e.getMessage());
                     }
                 }
             }
@@ -355,12 +374,16 @@ public class RecallEngineClient {
         }
     }
 
+    /**
+     * Perform the actual async write
+     *
+     * @return Future for tracking completion
+     */
     private Future<?> doAsyncWrite() {
         if (writeData.isEmpty()) {
             return null;
         }
 
-        // Snapshot data
         List<WriteItem> tempList = new ArrayList<>(writeData);
         writeData.clear();
 
@@ -372,7 +395,7 @@ public class RecallEngineClient {
                 grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
             }
 
-            // Send each group
+            // Write each group
             for (List<WriteItem> items : grouped.values()) {
                 if (items.isEmpty()) continue;
 
@@ -380,19 +403,19 @@ public class RecallEngineClient {
                 String tbl = items.get(0).table;
 
                 try {
-                    WriteRequest req = new WriteRequest();
+                    WriteRequest request = new WriteRequest();
                     List<Map<String, Object>> content = new ArrayList<>(items.size());
                     for (WriteItem item : items) {
                         content.add(item.data);
                     }
-                    req.setContent(content);
+                    request.setContent(content);
 
                     // Execute actual HTTP call with retry
                     if (retryTimes > 0) {
                         RecallEngineException lastException = null;
                         for (int i = 0; i < retryTimes; i++) {
                             try {
-                                doWrite(instId, tbl, req);
+                                doWrite(instId, tbl, request);
                                 lastException = null;
                                 break;
                             } catch (RecallEngineException e) {
@@ -404,12 +427,12 @@ public class RecallEngineClient {
                             throw lastException;
                         }
                     } else {
-                        doWrite(instId, tbl, req);
+                        doWrite(instId, tbl, request);
                     }
 
+                    logger.debug("Async write completed: {} items to {}/{}", items.size(), instId, tbl);
                 } catch (Exception e) {
-                    logger.error("Async write FAILED for {}/{}. Count: {}. Error: {}",
-                            instId, tbl, items.size(), e.getMessage(), e);
+                    logger.error("Async write failed for {}/{}: {}", instId, tbl, e.getMessage(), e);
                 }
             }
         });
@@ -420,6 +443,7 @@ public class RecallEngineClient {
      */
     public void close() {
         this.running = false;
+
         writeLock.lock();
         try {
             writeCondition.signalAll();
@@ -427,16 +451,19 @@ public class RecallEngineClient {
             writeLock.unlock();
         }
 
+        // Wait for async write thread to stop
         if (asyncWriteThread != null && asyncWriteThread.isAlive()) {
             try {
-                asyncWriteThread.join(2000);
+                asyncWriteThread.join(1000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
 
+        // Flush remaining data
         writeFlush();
 
+        // Shutdown executor
         if (writeExecutor != null && !writeExecutor.isShutdown()) {
             writeExecutor.shutdown();
             try {
@@ -445,12 +472,8 @@ public class RecallEngineClient {
                 }
             } catch (InterruptedException e) {
                 writeExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
             }
-        }
-
-        if (httpClient != null) {
-            httpClient.dispatcher().executorService().shutdown();
-            httpClient.connectionPool().evictAll();
         }
     }
 
