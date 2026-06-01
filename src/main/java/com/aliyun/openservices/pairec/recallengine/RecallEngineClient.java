@@ -410,36 +410,53 @@ public class RecallEngineClient {
             String threadName = "RecallEngineAsyncWriter";
             asyncWriteThread = new Thread(() -> {
                 while (running) {
+                    boolean shouldBreak = false;
+                    List<WriteItem> drained = null;
+
+                    // Phase 1: lock + await + drain (in-memory only).
                     writeLock.lock();
                     try {
-                        writeCondition.await(flushIntervalMs, TimeUnit.MILLISECONDS);
-                        if (!writeData.isEmpty()) {
-                            doAsyncWrite();
-                        }
-                    } catch (InterruptedException e) {
-                        logger.warn("{} interrupted, flushing remaining data before exit", threadName);
-                        Thread.currentThread().interrupt();
-                        // Flush remaining data before exit
                         try {
-                            if (!writeData.isEmpty()) {
-                                doAsyncWrite();
-                            }
-                        } catch (Exception ex) {
-                            logger.error("Failed to flush data on interrupt", ex);
+                            writeCondition.await(flushIntervalMs, TimeUnit.MILLISECONDS);
+                        } catch (InterruptedException e) {
+                            logger.warn("{} interrupted, flushing remaining data before exit", threadName);
+                            Thread.currentThread().interrupt();
+                            shouldBreak = true;
                         }
-                        break;
+                        drained = drainBufferLocked();
                     } finally {
                         writeLock.unlock();
                     }
+
+                    // Phase 2: submit OUTSIDE the lock so CallerRunsPolicy never
+                    // forces an HTTP write while writeLock is held.
+                    if (drained != null) {
+                        try {
+                            submitBatch(drained);
+                        } catch (Exception ex) {
+                            logger.error("Failed to submit batch", ex);
+                        }
+                    }
+
+                    if (shouldBreak) {
+                        break;
+                    }
                 }
-                // Handle remaining data after thread stops
+
+                // Final drain after the loop exits: same lock-then-submit pattern.
+                List<WriteItem> finalDrained;
                 writeLock.lock();
                 try {
-                    if (!writeData.isEmpty()) {
-                        doAsyncWrite();
-                    }
+                    finalDrained = drainBufferLocked();
                 } finally {
                     writeLock.unlock();
+                }
+                if (finalDrained != null) {
+                    try {
+                        submitBatch(finalDrained);
+                    } catch (Exception ex) {
+                        logger.error("Failed to submit final batch", ex);
+                    }
                 }
                 logger.info("{} has stopped.", threadName);
             }, threadName);
@@ -458,25 +475,26 @@ public class RecallEngineClient {
      * configured via {@link #withFlushTimeoutMs(long)}.
      */
     public void writeFlush() {
-        Future<?> future = null;
-        int pendingCount = 0;
+        // Phase 1: drain the buffer while holding the lock (in-memory only).
+        List<WriteItem> drained;
         writeLock.lock();
         try {
-            if (!writeData.isEmpty()) {
-                pendingCount = writeData.size();
-                logger.info("Write flush: {} items pending", pendingCount);
-                // doAsyncWrite() drains writeData into a temp list and submits
-                // to the executor; once it returns, the buffer is empty and
-                // the lock can be released safely.
-                future = doAsyncWrite();
-            }
+            drained = drainBufferLocked();
         } finally {
             writeLock.unlock();
         }
 
-        if (future == null) {
+        if (drained == null) {
             return;
         }
+
+        int pendingCount = drained.size();
+        logger.info("Write flush: {} items pending", pendingCount);
+
+        // Phase 2: submit OUTSIDE the lock. CallerRunsPolicy may execute the
+        // task synchronously when the executor queue is full; doing it without
+        // holding writeLock keeps producers and the background flusher unblocked.
+        Future<?> future = submitBatch(drained);
 
         try {
             future.get(flushTimeoutMs, TimeUnit.MILLISECONDS);
@@ -494,18 +512,36 @@ public class RecallEngineClient {
     }
 
     /**
-     * Perform the actual async write
+     * Drain the in-memory write buffer into a temporary list.
+     * <p>
+     * <b>MUST be called while holding {@code writeLock}.</b> The method only
+     * touches the in-memory buffer (no I/O), so the lock is released quickly.
      *
-     * @return Future for tracking completion
+     * @return the drained items, or {@code null} when the buffer was empty
      */
-    private Future<?> doAsyncWrite() {
+    private List<WriteItem> drainBufferLocked() {
         if (writeData.isEmpty()) {
             return null;
         }
-
         List<WriteItem> tempList = new ArrayList<>(writeData);
         writeData.clear();
+        return tempList;
+    }
 
+    /**
+     * Submit a drained batch to the write executor.
+     * <p>
+     * <b>MUST be called WITHOUT holding {@code writeLock}.</b> When the executor
+     * task queue is full, {@link java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy}
+     * runs the task on the calling thread; if that thread were holding
+     * {@code writeLock}, the lock would be retained throughout the HTTP write
+     * (and its retries), blocking every {@link #write} producer and the
+     * background flush thread.
+     *
+     * @param tempList already-drained items, must be non-empty
+     * @return Future for tracking completion of the submitted batch
+     */
+    private Future<?> submitBatch(final List<WriteItem> tempList) {
         return getWriteExecutor().submit(() -> {
             // Group by Instance/Table to minimize requests
             Map<String, List<WriteItem>> grouped = new HashMap<>();
