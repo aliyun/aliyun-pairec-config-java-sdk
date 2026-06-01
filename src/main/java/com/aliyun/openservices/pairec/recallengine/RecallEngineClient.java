@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -21,6 +22,10 @@ public class RecallEngineClient {
 
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final int DEFAULT_TIMEOUT_MS = 500;
+    // JVM-wide counter so async writer thread names stay unique across
+    // multiple RecallEngineClient instances (e.g. Flink parallel sub-tasks
+    // sharing one TaskManager).
+    private static final AtomicInteger ASYNC_WRITER_THREAD_COUNTER = new AtomicInteger();
 
     // --- Original Fields ---
     private String endpoint;
@@ -44,7 +49,17 @@ public class RecallEngineClient {
     private int batchSize = 20;       // Flush when buffer reaches this size
     private long flushIntervalMs = 50; // Or every 50ms
     private long flushTimeoutMs = 10000; // Max time writeFlush() waits for an in-flight HTTP batch
-    private int writeThreadPoolSize = 4;
+    // Default sized for I/O-bound HTTP work: 2x cores, capped to avoid runaway
+    // allocation on big hosts and bounded below to keep ≥2 workers on tiny ones.
+    // Flink users sharing a TaskManager across slots should override this
+    // explicitly via withWriteThreadPoolSize().
+    private int writeThreadPoolSize = Math.min(32,
+            Math.max(2, 2 * Runtime.getRuntime().availableProcessors()));
+    // Bounded executor task queue capacity. When full, the configured
+    // RejectedExecutionHandler (CallerRunsPolicy by default) makes the
+    // submitting thread run the task itself, providing natural backpressure
+    // instead of unbounded memory growth.
+    private int writeQueueCapacity = 1000;
 
     /**
      * Create a new RecallEngineClient
@@ -123,6 +138,24 @@ public class RecallEngineClient {
     public RecallEngineClient withWriteThreadPoolSize(int poolSize) {
         if (poolSize <= 0) throw new IllegalArgumentException("Thread pool size must be positive");
         this.writeThreadPoolSize = poolSize;
+        return this;
+    }
+
+    /**
+     * Configure the bounded queue capacity used by the async write executor.
+     * <p>
+     * When the queue is full, the executor falls back to
+     * {@link java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy} so that
+     * the submitting thread executes the task inline. This propagates
+     * backpressure to producers instead of dropping data or growing memory
+     * without bound.
+     *
+     * @param capacity queue capacity (default: 1000)
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withWriteQueueCapacity(int capacity) {
+        if (capacity <= 0) throw new IllegalArgumentException("Write queue capacity must be positive");
+        this.writeQueueCapacity = capacity;
         return this;
     }
 
@@ -322,10 +355,35 @@ public class RecallEngineClient {
                 throw new IllegalStateException(
                         "RecallEngineClient is closed; the async write executor cannot be recreated");
             }
-            executor = Executors.newFixedThreadPool(writeThreadPoolSize);
+            executor = createWriteExecutor();
             writeExecutor = executor;
             return executor;
         }
+    }
+
+    /**
+     * Build the async write executor: bounded queue + named daemon threads
+     * + caller-runs rejection policy. Caller-runs propagates backpressure to
+     * the submitting thread (background flush thread or writeFlush() caller)
+     * instead of dropping data on overload.
+     */
+    private ThreadPoolExecutor createWriteExecutor() {
+        ThreadFactory threadFactory = new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r,
+                        "RecallEngineWriter-" + ASYNC_WRITER_THREAD_COUNTER.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            }
+        };
+        return new ThreadPoolExecutor(
+                writeThreadPoolSize,
+                writeThreadPoolSize,
+                0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<Runnable>(writeQueueCapacity),
+                threadFactory,
+                new ThreadPoolExecutor.CallerRunsPolicy());
     }
 
     /**
