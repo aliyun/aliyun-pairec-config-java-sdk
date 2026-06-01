@@ -570,10 +570,13 @@ public class RecallEngineClient {
             writeLock.unlock();
         }
 
-        // Wait for async write thread to stop
+        // Wait for async write thread to stop. No timeout here: the worker
+        // exits its loop as soon as it observes running=false, plus an upper
+        // bound of flushIntervalMs in await(); a hard 1s ceiling used to cut
+        // the worker off mid-flush and silently drop buffered records.
         if (asyncWriteThread != null && asyncWriteThread.isAlive()) {
             try {
-                asyncWriteThread.join(1000);
+                asyncWriteThread.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -582,11 +585,14 @@ public class RecallEngineClient {
         // Flush remaining data
         writeFlush();
 
-        // Shutdown executor
+        // Shutdown executor. Allow up to 15s for already-submitted HTTP
+        // batches (including their retries) to complete before forcing
+        // shutdownNow(); the previous 5s ceiling routinely interrupted
+        // in-flight requests on slow backends and lost data.
         if (writeExecutor != null && !writeExecutor.isShutdown()) {
             writeExecutor.shutdown();
             try {
-                if (!writeExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                if (!writeExecutor.awaitTermination(15, TimeUnit.SECONDS)) {
                     writeExecutor.shutdownNow();
                 }
             } catch (InterruptedException e) {
