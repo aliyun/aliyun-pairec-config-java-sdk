@@ -43,6 +43,7 @@ public class RecallEngineClient {
     // Async Configs (Defaults)
     private int batchSize = 20;       // Flush when buffer reaches this size
     private long flushIntervalMs = 50; // Or every 50ms
+    private long flushTimeoutMs = 10000; // Max time writeFlush() waits for an in-flight HTTP batch
     private int writeThreadPoolSize = 4;
 
     /**
@@ -97,6 +98,25 @@ public class RecallEngineClient {
     public RecallEngineClient withFlushInterval(long flushIntervalMs) {
         if (flushIntervalMs <= 0) throw new IllegalArgumentException("Flush interval must be positive");
         this.flushIntervalMs = flushIntervalMs;
+        return this;
+    }
+
+    /**
+     * Configure the maximum time {@link #writeFlush()} will wait for the
+     * pending HTTP write batch to complete before giving up.
+     * <p>
+     * The flush HTTP request is executed outside the buffer lock; this timeout
+     * only bounds how long callers (e.g. {@link #close()} or a Flink Sink
+     * checkpoint) are willing to wait. On timeout the in-flight future is
+     * cancelled and the call returns; data already submitted to the executor
+     * may still be sent best-effort.
+     *
+     * @param flushTimeoutMs flush timeout in milliseconds (default: 10000)
+     * @return this client for method chaining
+     */
+    public RecallEngineClient withFlushTimeoutMs(long flushTimeoutMs) {
+        if (flushTimeoutMs <= 0) throw new IllegalArgumentException("Flush timeout must be positive");
+        this.flushTimeoutMs = flushTimeoutMs;
         return this;
     }
 
@@ -353,24 +373,47 @@ public class RecallEngineClient {
     }
 
     /**
-     * Force flush remaining data (Synchronous wait)
+     * Force flush remaining data and wait for the HTTP batch to complete.
+     * <p>
+     * The HTTP request is submitted while holding the buffer lock, but the
+     * caller waits for completion <em>outside</em> the lock so that concurrent
+     * producers ({@link #write}) and the background flush thread are not
+     * blocked by network I/O. The wait is bounded by {@code flushTimeoutMs}
+     * configured via {@link #withFlushTimeoutMs(long)}.
      */
     public void writeFlush() {
+        Future<?> future = null;
+        int pendingCount = 0;
         writeLock.lock();
         try {
             if (!writeData.isEmpty()) {
-                logger.info("Write flush: {} items pending", writeData.size());
-                Future<?> future = doAsyncWrite();
-                if (future != null) {
-                    try {
-                        future.get();
-                    } catch (Exception e) {
-                        logger.error("Error waiting for write completion: {}", e.getMessage());
-                    }
-                }
+                pendingCount = writeData.size();
+                logger.info("Write flush: {} items pending", pendingCount);
+                // doAsyncWrite() drains writeData into a temp list and submits
+                // to the executor; once it returns, the buffer is empty and
+                // the lock can be released safely.
+                future = doAsyncWrite();
             }
         } finally {
             writeLock.unlock();
+        }
+
+        if (future == null) {
+            return;
+        }
+
+        try {
+            future.get(flushTimeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            logger.error("Write flush timed out after {} ms with {} items in flight; cancelling",
+                    flushTimeoutMs, pendingCount);
+            future.cancel(true);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            logger.warn("Write flush interrupted while waiting for completion");
+        } catch (Exception e) {
+            logger.error("Error waiting for write completion: {}", e.getMessage(), e);
         }
     }
 
