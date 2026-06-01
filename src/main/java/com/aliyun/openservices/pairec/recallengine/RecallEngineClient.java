@@ -202,6 +202,14 @@ public class RecallEngineClient {
      * Signature matches the original synchronous version.
      */
     public WriteResponse write(String instanceId, String table, WriteRequest request) {
+        // Fail fast if the client has already been closed. Without this check,
+        // data would be added to the buffer after close() drained it, with no
+        // background thread or executor to consume it (silent data loss).
+        if (!running) {
+            throw new IllegalStateException(
+                    "RecallEngineClient is closed; cannot accept new writes");
+        }
+
         // 1. Start background thread if needed
         startAsyncWriteThread();
 
@@ -298,16 +306,26 @@ public class RecallEngineClient {
 
     private ExecutorService getWriteExecutor() {
         ExecutorService executor = writeExecutor;
-        if (executor == null || executor.isShutdown()) {
-            synchronized (this) {
-                executor = writeExecutor;
-                if (executor == null || executor.isShutdown()) {
-                    executor = Executors.newFixedThreadPool(writeThreadPoolSize);
-                    writeExecutor = executor;
-                }
-            }
+        if (executor != null && !executor.isShutdown()) {
+            return executor;
         }
-        return executor;
+        synchronized (this) {
+            executor = writeExecutor;
+            if (executor != null && !executor.isShutdown()) {
+                return executor;
+            }
+            // Refuse to recreate the executor once the client has been closed.
+            // Without this guard, getWriteExecutor() would silently spin up a
+            // new thread pool that nobody owns, leaking threads and accepting
+            // writes that will never be observed by close()/writeFlush().
+            if (!running) {
+                throw new IllegalStateException(
+                        "RecallEngineClient is closed; the async write executor cannot be recreated");
+            }
+            executor = Executors.newFixedThreadPool(writeThreadPoolSize);
+            writeExecutor = executor;
+            return executor;
+        }
     }
 
     /**

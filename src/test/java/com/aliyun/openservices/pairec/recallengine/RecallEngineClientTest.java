@@ -164,4 +164,37 @@ public class RecallEngineClientTest {
             }
         }
     }
+
+    /**
+     * Verifies that calling write() after close() fails fast instead of
+     * silently dropping data. Pre-fix: write() would add to the (drained)
+     * buffer and getWriteExecutor() would spin up a new orphan thread pool
+     * that no one owns. Post-fix: both call sites refuse with
+     * IllegalStateException.
+     */
+    @Test(timeout = 5000)
+    public void testWriteAfterCloseThrows() {
+        // Endpoint is irrelevant — we never reach the network. Use a port that
+        // is unlikely to be open; even a connection failure is fine because
+        // close() is what we exercise here.
+        RecallEngineClient cli = new RecallEngineClient("http://127.0.0.1:1", "u", "p")
+                .withBatchSize(10000)
+                .withFlushInterval(60_000)
+                .withFlushTimeoutMs(500);
+
+        cli.close();
+
+        WriteRequest req = new WriteRequest();
+        Map<String, Object> row = new HashMap<>();
+        row.put("id", "1");
+        req.setContent(Collections.singletonList(row));
+
+        try {
+            cli.write("inst", "tbl", req);
+            org.junit.Assert.fail("write() after close() should throw IllegalStateException");
+        } catch (IllegalStateException expected) {
+            assertTrue("error message should mention 'closed': " + expected.getMessage(),
+                    expected.getMessage().toLowerCase().contains("closed"));
+        }
+    }
 }
