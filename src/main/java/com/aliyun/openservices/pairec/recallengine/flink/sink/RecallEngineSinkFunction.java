@@ -2,7 +2,7 @@ package com.aliyun.openservices.pairec.recallengine.flink.sink;
 
 import com.aliyun.openservices.pairec.recallengine.RecallEngineClient;
 import com.aliyun.openservices.pairec.recallengine.WriteRequest;
-import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
@@ -28,7 +28,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class RecallEngineSinkFunction implements SinkFunction<RowData> {
+public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
     
     private static final Logger LOG = LoggerFactory.getLogger(RecallEngineSinkFunction.class);
     
@@ -105,7 +105,7 @@ public class RecallEngineSinkFunction implements SinkFunction<RowData> {
             } catch (Exception e) {
                 LOG.error("Failed to write data to RecallEngine. instanceId: {}, table: {}, data: {}, error: {}",
                         instanceId, table, data, e.getMessage(), e);
-                // Swallow the exception to continue processing
+                throw new RuntimeException("Failed to write data to RecallEngine", e);
             }
         }
     }
@@ -146,6 +146,15 @@ public class RecallEngineSinkFunction implements SinkFunction<RowData> {
         }
     }
     
+    @Override
+    public void close() throws Exception {
+        if (client != null) {
+            client.writeFlush();
+            client.close();
+        }
+        super.close();
+    }
+
     private Object extractArrayValue(ArrayData arrayData, ArrayType arrayType) {
         if (arrayData == null || arrayData.size() == 0) {
             return null;
