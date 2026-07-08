@@ -1,5 +1,6 @@
 package com.aliyun.openservices.pairec.recallengine.flink.factory;
 
+import com.aliyun.openservices.pairec.recallengine.InsertMode;
 import com.aliyun.openservices.pairec.recallengine.flink.sink.RecallEngineDynamicTableSink;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
@@ -50,12 +51,17 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
             .stringType()
             .noDefaultValue()
             .withDescription("Optional Authorization header value");
-    
+
+    public static final ConfigOption<String> INSERT_MODE = ConfigOptions.key("insert_mode")
+            .stringType()
+            .defaultValue("insert")
+            .withDescription("Write mode: 'insert' (default) or 'upsert'");
+
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
         final FactoryUtil.TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(this, context);
         helper.validate();
-        
+
         final ReadableConfig options = helper.getOptions();
         final String endpoint = options.get(ENDPOINT);
         final String instanceId = options.get(INSTANCE_ID);
@@ -63,18 +69,20 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
         final String username = options.get(USERNAME);
         final String password = options.get(PASSWORD);
         final int retryTimes = options.get(RETRY_TIMES);
-        
+
         String authorization = null;
         if (options.getOptional(AUTHORIZATION).isPresent()) {
             authorization = options.get(AUTHORIZATION);
         }
-        
+
+        InsertMode insertMode = InsertMode.fromValue(options.get(INSERT_MODE));
+
         final DataType producedDataType =
                 context.getCatalogTable().getResolvedSchema().toPhysicalRowDataType();
-        
+
         return new RecallEngineDynamicTableSink(
-                endpoint, instanceId, table, username, password, 
-                retryTimes, authorization, producedDataType);
+                endpoint, instanceId, table, username, password,
+                retryTimes, authorization, insertMode, producedDataType);
     }
     
     @Override
@@ -98,6 +106,7 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
         final Set<ConfigOption<?>> options = new HashSet<>();
         options.add(RETRY_TIMES);
         options.add(AUTHORIZATION);
+        options.add(INSERT_MODE);
         return options;
     }
 }
