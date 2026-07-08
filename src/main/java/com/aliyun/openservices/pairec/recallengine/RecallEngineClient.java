@@ -64,17 +64,12 @@ public class RecallEngineClient {
      * @param password the password for authentication
      */
     public RecallEngineClient(String endpoint, String username, String password) {
-        this.endpoint = endpoint;
+        this.endpoint = normalizeEndpoint(endpoint);
         this.username = username;
         this.password = password;
         this.retryTimes = 0;
         this.requestHeaders = new ConcurrentHashMap<>();
         this.objectMapper = new ObjectMapper();
-        
-        // Ensure endpoint has schema
-        if (!this.endpoint.startsWith("http://") && !this.endpoint.startsWith("https://")) {
-            this.endpoint = "http://" + this.endpoint;
-        }
         
         // Create default HTTP client
         this.httpClient = new OkHttpClient.Builder()
@@ -187,7 +182,9 @@ public class RecallEngineClient {
                             networkConfig.getStatus(),
                             networkConfig.getPrivateLinkAddress());
                         if (networkConfig.getPublicEndpoint() != null && !networkConfig.getPublicEndpoint().isEmpty()) {
-                            this.endpoint = networkConfig.getPublicEndpoint();
+                            // Normalize the fetched endpoint so that downstream URL building
+                            // never produces a schema-less URL that OkHttp would reject.
+                            this.endpoint = normalizeEndpoint(networkConfig.getPublicEndpoint());
                             if (networkConfig.getToken() != null) {
                                 this.requestHeaders.put("Authorization", networkConfig.getToken());
                             }
@@ -508,6 +505,26 @@ public class RecallEngineClient {
             authCache = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
         }
         return authCache;
+    }
+
+    /**
+     * Ensure the given endpoint carries an explicit URL scheme.
+     * If neither {@code http://} nor {@code https://} is present, {@code http://}
+     * is prepended so that downstream URL construction never produces a value
+     * that OkHttp rejects with {@code IllegalArgumentException}.
+     *
+     * @param endpoint raw endpoint, may be {@code null} or empty
+     * @return endpoint with a guaranteed URL scheme, or the original value when
+     *         it is {@code null} / empty (defer null handling to callers)
+     */
+    private static String normalizeEndpoint(String endpoint) {
+        if (endpoint == null || endpoint.isEmpty()) {
+            return endpoint;
+        }
+        if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+            return endpoint;
+        }
+        return "http://" + endpoint;
     }
 
     /**
