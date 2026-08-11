@@ -18,6 +18,8 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
     private final int retryTimes;
     private final String authorization;
     private final InsertMode insertMode;
+    private final int batchSize;
+    private final long flushIntervalMs;
     private final DataType dataType;
 
     public RecallEngineDynamicTableSink(
@@ -29,6 +31,8 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
             int retryTimes,
             String authorization,
             InsertMode insertMode,
+            int batchSize,
+            long flushIntervalMs,
             DataType dataType) {
         this.endpoint = endpoint;
         this.instanceId = instanceId;
@@ -38,6 +42,8 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
         this.retryTimes = retryTimes;
         this.authorization = authorization;
         this.insertMode = insertMode;
+        this.batchSize = batchSize;
+        this.flushIntervalMs = flushIntervalMs;
         this.dataType = dataType;
     }
     
@@ -53,7 +59,7 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
         RecallEngineSinkFunction sinkFunction = new RecallEngineSinkFunction(
                 endpoint, instanceId, table, username, password,
-                retryTimes, authorization, insertMode, dataType);
+                retryTimes, authorization, insertMode, batchSize, flushIntervalMs, dataType);
         return SinkFunctionProvider.of(sinkFunction);
     }
 
@@ -61,7 +67,7 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
     public DynamicTableSink copy() {
         return new RecallEngineDynamicTableSink(
                 endpoint, instanceId, table, username, password,
-                retryTimes, authorization, insertMode, dataType);
+                retryTimes, authorization, insertMode, batchSize, flushIntervalMs, dataType);
     }
     
     @Override

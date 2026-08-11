@@ -57,6 +57,16 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
             .defaultValue("insert")
             .withDescription("Write mode: 'insert' (default) or 'upsert'");
 
+    public static final ConfigOption<Integer> BATCH_SIZE = ConfigOptions.key("batch_size")
+            .intType()
+            .defaultValue(200)
+            .withDescription("Rows per write request; the sink flushes as soon as this many rows are buffered");
+
+    public static final ConfigOption<Long> FLUSH_INTERVAL_MS = ConfigOptions.key("flush_interval_ms")
+            .longType()
+            .defaultValue(50L)
+            .withDescription("Flush a partial batch after this many milliseconds");
+
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
         final FactoryUtil.TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(this, context);
@@ -76,13 +86,16 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
         }
 
         InsertMode insertMode = InsertMode.fromValue(options.get(INSERT_MODE));
+        final int batchSize = options.get(BATCH_SIZE);
+        final long flushIntervalMs = options.get(FLUSH_INTERVAL_MS);
 
         final DataType producedDataType =
                 context.getCatalogTable().getResolvedSchema().toPhysicalRowDataType();
 
         return new RecallEngineDynamicTableSink(
                 endpoint, instanceId, table, username, password,
-                retryTimes, authorization, insertMode, producedDataType);
+                retryTimes, authorization, insertMode, batchSize, flushIntervalMs,
+                producedDataType);
     }
     
     @Override
@@ -107,6 +120,8 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
         options.add(RETRY_TIMES);
         options.add(AUTHORIZATION);
         options.add(INSERT_MODE);
+        options.add(BATCH_SIZE);
+        options.add(FLUSH_INTERVAL_MS);
         return options;
     }
 }
