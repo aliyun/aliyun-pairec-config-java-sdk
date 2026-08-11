@@ -445,8 +445,12 @@ public class RecallEngineClient {
                         flushBufferLocked();
                     } catch (InterruptedException e) {
                         logger.warn("{} interrupted, flushing remaining data before exit", threadName);
-                        Thread.currentThread().interrupt();
+                        // Flush before re-asserting the interrupt: the whole
+                        // point of this flush is to save the last rows, and an
+                        // already-interrupted thread risks having its HTTP call
+                        // aborted underneath it.
                         flushBufferLocked();
+                        Thread.currentThread().interrupt();
                         break;
                     } finally {
                         writeLock.unlock();

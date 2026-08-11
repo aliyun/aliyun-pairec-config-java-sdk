@@ -5,6 +5,7 @@ import com.aliyun.openservices.pairec.recallengine.flink.sink.RecallEngineDynami
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.FactoryUtil;
@@ -86,8 +87,19 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
         }
 
         InsertMode insertMode = InsertMode.fromValue(options.get(INSERT_MODE));
+        // Validate here rather than letting the client reject these when the
+        // first record arrives: a bad value should fail job submission, not a
+        // running job.
         final int batchSize = options.get(BATCH_SIZE);
+        if (batchSize <= 0) {
+            throw new ValidationException(
+                    String.format("'%s' must be positive, got %d", BATCH_SIZE.key(), batchSize));
+        }
         final long flushIntervalMs = options.get(FLUSH_INTERVAL_MS);
+        if (flushIntervalMs <= 0) {
+            throw new ValidationException(
+                    String.format("'%s' must be positive, got %d", FLUSH_INTERVAL_MS.key(), flushIntervalMs));
+        }
 
         final DataType producedDataType =
                 context.getCatalogTable().getResolvedSchema().toPhysicalRowDataType();
