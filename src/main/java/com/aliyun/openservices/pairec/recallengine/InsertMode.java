@@ -28,18 +28,46 @@ public enum InsertMode {
         return value;
     }
 
+    /**
+     * Parses the given string into an InsertMode.
+     *
+     * <p>A null input falls back to the default {@link #INSERT} mode, which keeps
+     * requests without an explicit insert_mode backward compatible. Any other
+     * unrecognized value is rejected instead of silently degrading to INSERT,
+     * so that a misconfigured insert_mode (for example a typo in a Flink DDL
+     * option) fails fast rather than changing the write semantics unnoticed.
+     *
+     * @param value the mode name, case-insensitive and surrounding whitespace tolerant
+     * @return the matching InsertMode, or INSERT when value is null
+     * @throws IllegalArgumentException if value is non-null but not a supported mode
+     */
     @JsonCreator
     public static InsertMode fromValue(String value) {
         if (value == null) {
             return INSERT;
         }
+        String normalized = value.trim();
         for (InsertMode mode : InsertMode.values()) {
-            if (mode.value.equalsIgnoreCase(value)) {
+            if (mode.value.equalsIgnoreCase(normalized)) {
                 return mode;
             }
         }
-        // Default to INSERT for unknown values
-        return INSERT;
+        throw new IllegalArgumentException(
+                "Unsupported insert_mode: '" + value + "'. Supported values: " + supportedValues());
+    }
+
+    /**
+     * Returns the comma separated list of accepted insert_mode values, used in error messages.
+     */
+    private static String supportedValues() {
+        StringBuilder sb = new StringBuilder();
+        for (InsertMode mode : InsertMode.values()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(mode.value);
+        }
+        return sb.toString();
     }
 
     @Override
