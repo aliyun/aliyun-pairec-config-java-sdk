@@ -256,12 +256,13 @@ public class RecallEngineClient {
         }
 
         int itemCount = request.getContent().size();
+        InsertMode insertMode = request.getInsertMode();
 
         // 3. Add to buffer
         writeLock.lock();
         try {
             for (Map<String, Object> data : request.getContent()) {
-                writeData.add(new WriteItem(instanceId, table, data));
+                writeData.add(new WriteItem(instanceId, table, data, insertMode));
             }
             // Signal if batch size reached
             if (writeData.size() >= batchSize) {
@@ -543,10 +544,10 @@ public class RecallEngineClient {
      */
     private Future<?> submitBatch(final List<WriteItem> tempList) {
         return getWriteExecutor().submit(() -> {
-            // Group by Instance/Table to minimize requests
+            // Group by Instance/Table/InsertMode to minimize requests
             Map<String, List<WriteItem>> grouped = new HashMap<>();
             for (WriteItem item : tempList) {
-                String key = item.instanceId + "|" + item.table;
+                String key = item.instanceId + "|" + item.table + "|" + item.insertMode.getValue();
                 grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
             }
 
@@ -556,6 +557,7 @@ public class RecallEngineClient {
 
                 String instId = items.get(0).instanceId;
                 String tbl = items.get(0).table;
+                InsertMode mode = items.get(0).insertMode;
 
                 try {
                     WriteRequest request = new WriteRequest();
@@ -564,6 +566,7 @@ public class RecallEngineClient {
                         content.add(item.data);
                     }
                     request.setContent(content);
+                    request.setInsertMode(mode);
 
                     // Execute actual HTTP call with retry
                     if (retryTimes > 0) {
@@ -644,11 +647,13 @@ public class RecallEngineClient {
         final String instanceId;
         final String table;
         final Map<String, Object> data;
+        final InsertMode insertMode;
 
-        WriteItem(String instanceId, String table, Map<String, Object> data) {
+        WriteItem(String instanceId, String table, Map<String, Object> data, InsertMode insertMode) {
             this.instanceId = instanceId;
             this.table = table;
             this.data = data;
+            this.insertMode = insertMode;
         }
     }
 }

@@ -15,7 +15,10 @@ public class WriteRequest {
     private List<Map<String, Object>> content;
     
     private String versionId;
-    
+
+    @JsonProperty("insert_mode")
+    private InsertMode insertMode = InsertMode.INSERT;
+
     public WriteRequest() {
     }
     
@@ -41,5 +44,25 @@ public class WriteRequest {
     
     public void setVersionId(String versionId) {
         this.versionId = versionId;
+    }
+
+    public InsertMode getInsertMode() {
+        return insertMode;
+    }
+
+    /**
+     * Sets the write mode of this request.
+     *
+     * <p>A null argument means "not specified" and falls back to the default
+     * {@link InsertMode#INSERT}, consistent with {@link InsertMode#fromValue(String)}.
+     * Normalizing here keeps {@link #getInsertMode()} non-null for every caller,
+     * including Jackson deserialization of an explicit {@code "insert_mode": null}
+     * (which is routed through this setter), so downstream writers never have to
+     * guard against a null mode.
+     *
+     * @param insertMode the write mode, or null to use the default INSERT mode
+     */
+    public void setInsertMode(InsertMode insertMode) {
+        this.insertMode = (insertMode == null) ? InsertMode.INSERT : insertMode;
     }
 }

@@ -1,5 +1,6 @@
 package com.aliyun.openservices.pairec.recallengine.flink.sink;
 
+import com.aliyun.openservices.pairec.recallengine.InsertMode;
 import com.aliyun.openservices.pairec.recallengine.RecallEngineClient;
 import com.aliyun.openservices.pairec.recallengine.WriteRequest;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
@@ -39,6 +40,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
     private final String password;
     private final int retryTimes;
     private final String authorization;
+    private final InsertMode insertMode;
     private final List<RowType.RowField> fields;
     
     private transient RecallEngineClient client;
@@ -51,6 +53,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
             String password,
             int retryTimes,
             String authorization,
+            InsertMode insertMode,
             DataType dataType) {
         this.endpoint = endpoint;
         this.instanceId = instanceId;
@@ -59,6 +62,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
         this.password = password;
         this.retryTimes = retryTimes;
         this.authorization = authorization;
+        this.insertMode = insertMode;
         
         RowType rowType = (RowType) dataType.getLogicalType();
         this.fields = rowType.getFields();
@@ -99,6 +103,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
             
             WriteRequest request = new WriteRequest();
             request.setContent(content);
+            request.setInsertMode(insertMode);
 
             try {
                 client.write(instanceId, table, request);
