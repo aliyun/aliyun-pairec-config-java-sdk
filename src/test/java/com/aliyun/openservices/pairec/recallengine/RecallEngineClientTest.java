@@ -80,6 +80,11 @@ public class RecallEngineClientTest {
         WriteResponse resp = client.write(instanceId, "u2i_table", request);
         assertEquals("write-req-123", resp.getRequestId());
         assertEquals("OK", resp.getCode());
+
+        // One row does not fill a batch, so the request is still buffered here.
+        // Flush so the row actually reaches the service instead of being
+        // dropped when the test JVM exits.
+        client.writeFlush();
     }
 
     /**
