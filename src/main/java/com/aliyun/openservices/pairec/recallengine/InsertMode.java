@@ -8,12 +8,23 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 public enum InsertMode {
     /**
-     * Insert mode: insert new records only, fail if record exists (default)
+     * Insert mode (default): writes the record as a whole row.
+     *
+     * <p>A record whose primary key already exists is <em>replaced</em>, not
+     * rejected. Because the replacement covers the whole row, any field absent
+     * from the request is dropped from the stored record, so a request that
+     * carries only part of the columns clears the ones it omits. Supported by
+     * every table type.
      */
     INSERT("insert"),
 
     /**
-     * Upsert mode: insert new records or update existing ones
+     * Upsert mode: merges the record into the existing row.
+     *
+     * <p>Fields carried by the request overwrite their stored counterparts,
+     * while fields absent from the request keep their current values. This is
+     * the mode to use for partial updates. Only KV and Vector tables support
+     * upsert; other table types reject the request.
      */
     UPSERT("upsert");
 
