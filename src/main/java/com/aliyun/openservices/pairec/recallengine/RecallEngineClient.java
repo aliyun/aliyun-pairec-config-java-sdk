@@ -7,27 +7,34 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * RecallEngine Client.
- * - recall: Synchronous
- * - write: Asynchronous (Buffered & Batched)
+ * <ul>
+ *   <li>recall: synchronous</li>
+ *   <li>write: synchronous, buffered and batched</li>
+ * </ul>
+ *
+ * <p>Rows handed to {@link #write} are buffered in memory. Once the buffer
+ * reaches {@code batchSize} the HTTP request is issued <em>on the calling
+ * thread</em>. The caller is therefore paced by the actual write throughput of
+ * the backend, which propagates backpressure to the producer (e.g. a Flink
+ * sink) and keeps the buffer from growing without bound.
  */
 public class RecallEngineClient {
     public static final Logger logger = LoggerFactory.getLogger(RecallEngineClient.class);
 
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final int DEFAULT_TIMEOUT_MS = 500;
-    // JVM-wide counter so async writer thread names stay unique across
-    // multiple RecallEngineClient instances (e.g. Flink parallel sub-tasks
-    // sharing one TaskManager).
-    private static final AtomicInteger ASYNC_WRITER_THREAD_COUNTER = new AtomicInteger();
+    // JVM-wide counter so flush timer thread names stay unique across multiple
+    // RecallEngineClient instances (e.g. Flink parallel sub-tasks sharing one
+    // TaskManager).
+    private static final AtomicInteger FLUSH_TIMER_THREAD_COUNTER = new AtomicInteger();
 
-    // --- Original Fields ---
     private String endpoint;
     private String username;
     private String password;
@@ -37,29 +44,20 @@ public class RecallEngineClient {
     private String authCache;
     private ObjectMapper objectMapper;
 
-    // --- Async Write Infrastructure ---
+    // --- Write buffer ---
     private final List<WriteItem> writeData = new ArrayList<>();
     private final ReentrantLock writeLock = new ReentrantLock();
     private final Condition writeCondition = writeLock.newCondition();
-    private volatile ExecutorService writeExecutor;
     private volatile boolean running = true;
-    private volatile Thread asyncWriteThread;
+    private volatile Thread flushTimerThread;
 
-    // Async Configs (Defaults)
-    private int batchSize = 20;       // Flush when buffer reaches this size
-    private long flushIntervalMs = 50; // Or every 50ms
-    private long flushTimeoutMs = 10000; // Max time writeFlush() waits for an in-flight HTTP batch
-    // Default sized for I/O-bound HTTP work: 2x cores, capped to avoid runaway
-    // allocation on big hosts and bounded below to keep ≥2 workers on tiny ones.
-    // Flink users sharing a TaskManager across slots should override this
-    // explicitly via withWriteThreadPoolSize().
-    private int writeThreadPoolSize = Math.min(32,
-            Math.max(2, 2 * Runtime.getRuntime().availableProcessors()));
-    // Bounded executor task queue capacity. When full, the configured
-    // RejectedExecutionHandler (CallerRunsPolicy by default) makes the
-    // submitting thread run the task itself, providing natural backpressure
-    // instead of unbounded memory growth.
-    private int writeQueueCapacity = 1000;
+    // Flush when the buffer reaches this many rows; also the row cap of a
+    // single HTTP request, so a traffic burst cannot be coalesced into one
+    // oversized body.
+    private int batchSize = 200;
+    // Flush whatever is buffered after this long, so low-traffic streams do not
+    // sit in the buffer waiting for a full batch.
+    private long flushIntervalMs = 50;
 
     /**
      * Create a new RecallEngineClient
@@ -103,63 +101,34 @@ public class RecallEngineClient {
         return this;
     }
 
-    // Async Write Configs
+    /**
+     * Configure the write batch size: the buffer is flushed as soon as it holds
+     * this many rows, and no single HTTP request carries more than this many
+     * rows.
+     *
+     * @param batchSize rows per batch (default: 200)
+     * @return this client for method chaining
+     */
     public RecallEngineClient withBatchSize(int batchSize) {
         if (batchSize <= 0) throw new IllegalArgumentException("Batch size must be positive");
         this.batchSize = batchSize;
         return this;
     }
 
+    /**
+     * Configure how long buffered rows may wait before being flushed even
+     * though the buffer has not reached {@code batchSize}.
+     *
+     * @param flushIntervalMs flush interval in milliseconds (default: 50)
+     * @return this client for method chaining
+     */
     public RecallEngineClient withFlushInterval(long flushIntervalMs) {
         if (flushIntervalMs <= 0) throw new IllegalArgumentException("Flush interval must be positive");
         this.flushIntervalMs = flushIntervalMs;
         return this;
     }
 
-    /**
-     * Configure the maximum time {@link #writeFlush()} will wait for the
-     * pending HTTP write batch to complete before giving up.
-     * <p>
-     * The flush HTTP request is executed outside the buffer lock; this timeout
-     * only bounds how long callers (e.g. {@link #close()} or a Flink Sink
-     * checkpoint) are willing to wait. On timeout the in-flight future is
-     * cancelled and the call returns; data already submitted to the executor
-     * may still be sent best-effort.
-     *
-     * @param flushTimeoutMs flush timeout in milliseconds (default: 10000)
-     * @return this client for method chaining
-     */
-    public RecallEngineClient withFlushTimeoutMs(long flushTimeoutMs) {
-        if (flushTimeoutMs <= 0) throw new IllegalArgumentException("Flush timeout must be positive");
-        this.flushTimeoutMs = flushTimeoutMs;
-        return this;
-    }
-
-    public RecallEngineClient withWriteThreadPoolSize(int poolSize) {
-        if (poolSize <= 0) throw new IllegalArgumentException("Thread pool size must be positive");
-        this.writeThreadPoolSize = poolSize;
-        return this;
-    }
-
-    /**
-     * Configure the bounded queue capacity used by the async write executor.
-     * <p>
-     * When the queue is full, the executor falls back to
-     * {@link java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy} so that
-     * the submitting thread executes the task inline. This propagates
-     * backpressure to producers instead of dropping data or growing memory
-     * without bound.
-     *
-     * @param capacity queue capacity (default: 1000)
-     * @return this client for method chaining
-     */
-    public RecallEngineClient withWriteQueueCapacity(int capacity) {
-        if (capacity <= 0) throw new IllegalArgumentException("Write queue capacity must be positive");
-        this.writeQueueCapacity = capacity;
-        return this;
-    }
-
-    // ==================== Recall (Synchronous - Unchanged) ====================
+    // ==================== Recall (Synchronous) ====================
 
     public RecallResponse recall(RecallRequest request) throws RecallEngineException {
         if (retryTimes > 0) {
@@ -212,7 +181,7 @@ public class RecallEngineClient {
                     } catch (Exception e) {
                         logger.debug("Failed to parse error response", e);
                     }
-                    throw new RecallEngineException(errorMsg);
+                    throw new RecallEngineException(errorMsg, response.code());
                 }
 
                 Record record = RecordUtils.unserializeRecord(responseBytes);
@@ -225,28 +194,27 @@ public class RecallEngineClient {
         }
     }
 
-    // ==================== Write (Asynchronous) ====================
+    // ==================== Write (Synchronous, Buffered) ====================
 
     /**
-     * Make an ASYNC write request.
-     * Data is buffered and sent in batches by a background thread.
-     * This method returns immediately.
+     * Buffer rows for writing and, once a full batch has accumulated, send it
+     * synchronously on the calling thread.
      *
-     * Signature matches the original synchronous version.
+     * <p>The returned {@link WriteResponse} acknowledges buffering, not
+     * server-side persistence: a batch that fails every retry is logged and
+     * dropped so that the producer keeps running.
      */
     public WriteResponse write(String instanceId, String table, WriteRequest request) {
         // Fail fast if the client has already been closed. Without this check,
-        // data would be added to the buffer after close() drained it, with no
-        // background thread or executor to consume it (silent data loss).
+        // data would be added to the buffer after close() drained it, with
+        // nothing left to flush it (silent data loss).
         if (!running) {
             throw new IllegalStateException(
                     "RecallEngineClient is closed; cannot accept new writes");
         }
 
-        // 1. Start background thread if needed
-        startAsyncWriteThread();
+        startFlushTimer();
 
-        // 2. Handle empty request
         if (request == null || request.getContent() == null || request.getContent().isEmpty()) {
             WriteResponse response = new WriteResponse();
             response.setRequestId(request != null ? request.getRequestId() : null);
@@ -258,32 +226,141 @@ public class RecallEngineClient {
         int itemCount = request.getContent().size();
         InsertMode insertMode = request.getInsertMode();
 
-        // 3. Add to buffer
         writeLock.lock();
         try {
             for (Map<String, Object> data : request.getContent()) {
                 writeData.add(new WriteItem(instanceId, table, data, insertMode));
             }
-            // Signal if batch size reached
             if (writeData.size() >= batchSize) {
-                writeCondition.signal();
+                // Write on the caller's thread. The caller is thereby paced by
+                // the backend, backpressure reaches the producer, and the
+                // buffer cannot outgrow one batch plus one call's worth of rows.
+                flushBufferLocked();
             }
         } finally {
             writeLock.unlock();
         }
 
-        // 4. Return immediate success acknowledgment
         WriteResponse response = new WriteResponse();
         response.setRequestId(request.getRequestId());
         response.setCode("OK");
-        response.setMessage(String.format("Accepted %d items for async write", itemCount));
+        response.setMessage(String.format("Buffered %d items for write", itemCount));
         return response;
     }
 
     /**
-     * Internal synchronous write logic (executed by background thread)
+     * Flush every buffered row synchronously.
      */
-    private WriteResponse doWrite(String instanceId, String table, WriteRequest request) throws RecallEngineException {
+    public void writeFlush() {
+        writeLock.lock();
+        try {
+            flushBufferLocked();
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    /**
+     * Write out the whole buffer, then clear it.
+     *
+     * <p><b>MUST be called while holding {@code writeLock}.</b> Holding the
+     * lock across the HTTP call is intentional: concurrent producers block
+     * until the in-flight batch completes, which is exactly the backpressure
+     * this client is meant to apply.
+     *
+     * <p>Rows are grouped by instance/table/insert-mode (one request per
+     * group) and each group is split into chunks of at most {@code batchSize}
+     * rows. A chunk that fails every retry is logged and dropped; the buffer is
+     * always cleared so a failure cannot make the buffer grow or resend rows.
+     */
+    private void flushBufferLocked() {
+        if (writeData.isEmpty()) {
+            return;
+        }
+        try {
+            // LinkedHashMap: keep the order rows arrived in, so writes to a
+            // given table stay in submission order.
+            Map<String, List<WriteItem>> grouped = new LinkedHashMap<>();
+            for (WriteItem item : writeData) {
+                String key = item.instanceId + "|" + item.table + "|" + item.insertMode.getValue();
+                grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
+            }
+
+            for (List<WriteItem> items : grouped.values()) {
+                String instanceId = items.get(0).instanceId;
+                String table = items.get(0).table;
+                InsertMode insertMode = items.get(0).insertMode;
+
+                for (int start = 0; start < items.size(); start += batchSize) {
+                    int end = Math.min(start + batchSize, items.size());
+                    List<Map<String, Object>> content = new ArrayList<>(end - start);
+                    for (WriteItem item : items.subList(start, end)) {
+                        content.add(item.data);
+                    }
+
+                    WriteRequest request = new WriteRequest();
+                    request.setContent(content);
+                    request.setInsertMode(insertMode);
+
+                    try {
+                        writeWithRetry(instanceId, table, request);
+                        logger.debug("write completed: {} items to {}/{}", content.size(), instanceId, table);
+                    } catch (Exception e) {
+                        // Keep the producer running: report the loss and move on
+                        // to the next chunk rather than failing the whole flush.
+                        logger.error("write failed for {}/{}, dropping {} items: {}",
+                                instanceId, table, content.size(), e.getMessage(), e);
+                    }
+                }
+            }
+        } finally {
+            // Never leave already-processed rows in the buffer, whatever happened.
+            writeData.clear();
+        }
+    }
+
+    /**
+     * Issue one write request, retrying transient failures.
+     *
+     * <p>{@code retryTimes} is the total number of attempts and is floored at
+     * 1, so a client left at the default still sends the request once instead
+     * of silently discarding the batch. Only throttling, server errors and
+     * transport failures are retried; a 4xx will not succeed on a second try.
+     */
+    private void writeWithRetry(String instanceId, String table, WriteRequest request)
+            throws RecallEngineException {
+        int maxAttempts = Math.max(1, retryTimes);
+        for (int attempt = 1; ; attempt++) {
+            try {
+                doWrite(instanceId, table, request);
+                return;
+            } catch (RecallEngineException e) {
+                if (attempt >= maxAttempts || !isRetryable(e.getStatusCode())) {
+                    throw e;
+                }
+                logger.warn("write failed for {}/{}, retrying ({}/{}), err: {}",
+                        instanceId, table, attempt, maxAttempts, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Throttling and server-side errors are worth another attempt, as is a
+     * failure that never produced a response (connect/read timeout). Every
+     * other 4xx is a problem with the request itself and will fail again.
+     */
+    private static boolean isRetryable(int statusCode) {
+        return statusCode == RecallEngineException.NO_STATUS_CODE
+                || statusCode == 429
+                || statusCode >= 500;
+    }
+
+    /**
+     * Perform a single write HTTP call. Package-visible rather than private so
+     * tests can substitute failures and observe the batching and retry
+     * behaviour without a server.
+     */
+    WriteResponse doWrite(String instanceId, String table, WriteRequest request) throws RecallEngineException {
         try {
             String json = objectMapper.writeValueAsString(request);
             String url = String.format("%s/api/v1/tables/%s/default/%s/write", endpoint, instanceId, table);
@@ -316,7 +393,7 @@ public class RecallEngineClient {
                     } catch (Exception e) {
                         // Ignore parse error
                     }
-                    throw new RecallEngineException(errorMsg);
+                    throw new RecallEngineException(errorMsg, response.code());
                 }
 
                 return objectMapper.readValue(responseBody, WriteResponse.class);
@@ -324,6 +401,7 @@ public class RecallEngineClient {
         } catch (RecallEngineException e) {
             throw e;
         } catch (Exception e) {
+            // No status code: transport or serialization failure, treated as retryable.
             throw new RecallEngineException("Write request failed", e);
         }
     }
@@ -336,268 +414,57 @@ public class RecallEngineClient {
         return authCache;
     }
 
-    // ==================== Async Implementation Details ====================
-
-    private ExecutorService getWriteExecutor() {
-        ExecutorService executor = writeExecutor;
-        if (executor != null && !executor.isShutdown()) {
-            return executor;
-        }
-        synchronized (this) {
-            executor = writeExecutor;
-            if (executor != null && !executor.isShutdown()) {
-                return executor;
-            }
-            // Refuse to recreate the executor once the client has been closed.
-            // Without this guard, getWriteExecutor() would silently spin up a
-            // new thread pool that nobody owns, leaking threads and accepting
-            // writes that will never be observed by close()/writeFlush().
-            if (!running) {
-                throw new IllegalStateException(
-                        "RecallEngineClient is closed; the async write executor cannot be recreated");
-            }
-            executor = createWriteExecutor();
-            writeExecutor = executor;
-            return executor;
-        }
-    }
-
     /**
-     * Build the async write executor: bounded queue + named daemon threads
-     * + caller-runs rejection policy. Caller-runs propagates backpressure to
-     * the submitting thread (background flush thread or writeFlush() caller)
-     * instead of dropping data on overload.
+     * Start the flush timer thread on first write.
+     *
+     * <p>The thread performs no writing of its own beyond bounding staleness:
+     * it flushes a partial buffer once {@code flushIntervalMs} has elapsed, so
+     * a low-traffic stream does not have to wait for a full batch. Writes it
+     * triggers are synchronous, under the same lock as {@link #write}.
+     *
+     * <p>Double-checked locking keeps the common case lock-free.
      */
-    private ThreadPoolExecutor createWriteExecutor() {
-        ThreadFactory threadFactory = new ThreadFactory() {
-            @Override
-            public Thread newThread(Runnable r) {
-                Thread t = new Thread(r,
-                        "RecallEngineWriter-" + ASYNC_WRITER_THREAD_COUNTER.incrementAndGet());
-                t.setDaemon(true);
-                return t;
-            }
-        };
-        return new ThreadPoolExecutor(
-                writeThreadPoolSize,
-                writeThreadPoolSize,
-                0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<Runnable>(writeQueueCapacity),
-                threadFactory,
-                new ThreadPoolExecutor.CallerRunsPolicy());
-    }
-
-    /**
-     * Start the async write background thread.
-     * Uses Double-Checked Locking for thread safety and performance:
-     * - First check without lock (fast path for most calls)
-     * - Only acquire lock when thread needs to be created
-     */
-    private void startAsyncWriteThread() {
-        // Fast path: if thread is already running, return immediately (no lock needed)
-        Thread thread = asyncWriteThread;
+    private void startFlushTimer() {
+        Thread thread = flushTimerThread;
         if (thread != null && thread.isAlive()) {
             return;
         }
 
-        // Slow path: need to create thread, use synchronized
         synchronized (this) {
-            // Double-check after acquiring lock
-            thread = asyncWriteThread;
+            thread = flushTimerThread;
             if (thread != null && thread.isAlive()) {
                 return;
             }
 
-            String threadName = "RecallEngineAsyncWriter";
-            asyncWriteThread = new Thread(() -> {
+            String threadName = "RecallEngineFlushTimer-" + FLUSH_TIMER_THREAD_COUNTER.incrementAndGet();
+            flushTimerThread = new Thread(() -> {
                 while (running) {
-                    boolean shouldBreak = false;
-                    List<WriteItem> drained = null;
-
-                    // Phase 1: lock + await + drain (in-memory only).
                     writeLock.lock();
                     try {
-                        try {
-                            writeCondition.await(flushIntervalMs, TimeUnit.MILLISECONDS);
-                        } catch (InterruptedException e) {
-                            logger.warn("{} interrupted, flushing remaining data before exit", threadName);
-                            Thread.currentThread().interrupt();
-                            shouldBreak = true;
-                        }
-                        drained = drainBufferLocked();
+                        writeCondition.await(flushIntervalMs, TimeUnit.MILLISECONDS);
+                        flushBufferLocked();
+                    } catch (InterruptedException e) {
+                        logger.warn("{} interrupted, flushing remaining data before exit", threadName);
+                        // Flush before re-asserting the interrupt: the whole
+                        // point of this flush is to save the last rows, and an
+                        // already-interrupted thread risks having its HTTP call
+                        // aborted underneath it.
+                        flushBufferLocked();
+                        Thread.currentThread().interrupt();
+                        break;
                     } finally {
                         writeLock.unlock();
-                    }
-
-                    // Phase 2: submit OUTSIDE the lock so CallerRunsPolicy never
-                    // forces an HTTP write while writeLock is held.
-                    if (drained != null) {
-                        try {
-                            submitBatch(drained);
-                        } catch (Exception ex) {
-                            logger.error("Failed to submit batch", ex);
-                        }
-                    }
-
-                    if (shouldBreak) {
-                        break;
-                    }
-                }
-
-                // Final drain after the loop exits: same lock-then-submit pattern.
-                List<WriteItem> finalDrained;
-                writeLock.lock();
-                try {
-                    finalDrained = drainBufferLocked();
-                } finally {
-                    writeLock.unlock();
-                }
-                if (finalDrained != null) {
-                    try {
-                        submitBatch(finalDrained);
-                    } catch (Exception ex) {
-                        logger.error("Failed to submit final batch", ex);
                     }
                 }
                 logger.info("{} has stopped.", threadName);
             }, threadName);
-            asyncWriteThread.setDaemon(true);
-            asyncWriteThread.start();
+            flushTimerThread.setDaemon(true);
+            flushTimerThread.start();
         }
     }
 
     /**
-     * Force flush remaining data and wait for the HTTP batch to complete.
-     * <p>
-     * The HTTP request is submitted while holding the buffer lock, but the
-     * caller waits for completion <em>outside</em> the lock so that concurrent
-     * producers ({@link #write}) and the background flush thread are not
-     * blocked by network I/O. The wait is bounded by {@code flushTimeoutMs}
-     * configured via {@link #withFlushTimeoutMs(long)}.
-     */
-    public void writeFlush() {
-        // Phase 1: drain the buffer while holding the lock (in-memory only).
-        List<WriteItem> drained;
-        writeLock.lock();
-        try {
-            drained = drainBufferLocked();
-        } finally {
-            writeLock.unlock();
-        }
-
-        if (drained == null) {
-            return;
-        }
-
-        int pendingCount = drained.size();
-        logger.info("Write flush: {} items pending", pendingCount);
-
-        // Phase 2: submit OUTSIDE the lock. CallerRunsPolicy may execute the
-        // task synchronously when the executor queue is full; doing it without
-        // holding writeLock keeps producers and the background flusher unblocked.
-        Future<?> future = submitBatch(drained);
-
-        try {
-            future.get(flushTimeoutMs, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            logger.error("Write flush timed out after {} ms with {} items in flight; cancelling",
-                    flushTimeoutMs, pendingCount);
-            future.cancel(true);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            future.cancel(true);
-            logger.warn("Write flush interrupted while waiting for completion");
-        } catch (Exception e) {
-            logger.error("Error waiting for write completion: {}", e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Drain the in-memory write buffer into a temporary list.
-     * <p>
-     * <b>MUST be called while holding {@code writeLock}.</b> The method only
-     * touches the in-memory buffer (no I/O), so the lock is released quickly.
-     *
-     * @return the drained items, or {@code null} when the buffer was empty
-     */
-    private List<WriteItem> drainBufferLocked() {
-        if (writeData.isEmpty()) {
-            return null;
-        }
-        List<WriteItem> tempList = new ArrayList<>(writeData);
-        writeData.clear();
-        return tempList;
-    }
-
-    /**
-     * Submit a drained batch to the write executor.
-     * <p>
-     * <b>MUST be called WITHOUT holding {@code writeLock}.</b> When the executor
-     * task queue is full, {@link java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy}
-     * runs the task on the calling thread; if that thread were holding
-     * {@code writeLock}, the lock would be retained throughout the HTTP write
-     * (and its retries), blocking every {@link #write} producer and the
-     * background flush thread.
-     *
-     * @param tempList already-drained items, must be non-empty
-     * @return Future for tracking completion of the submitted batch
-     */
-    private Future<?> submitBatch(final List<WriteItem> tempList) {
-        return getWriteExecutor().submit(() -> {
-            // Group by Instance/Table/InsertMode to minimize requests
-            Map<String, List<WriteItem>> grouped = new HashMap<>();
-            for (WriteItem item : tempList) {
-                String key = item.instanceId + "|" + item.table + "|" + item.insertMode.getValue();
-                grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
-            }
-
-            // Write each group
-            for (List<WriteItem> items : grouped.values()) {
-                if (items.isEmpty()) continue;
-
-                String instId = items.get(0).instanceId;
-                String tbl = items.get(0).table;
-                InsertMode mode = items.get(0).insertMode;
-
-                try {
-                    WriteRequest request = new WriteRequest();
-                    List<Map<String, Object>> content = new ArrayList<>(items.size());
-                    for (WriteItem item : items) {
-                        content.add(item.data);
-                    }
-                    request.setContent(content);
-                    request.setInsertMode(mode);
-
-                    // Execute actual HTTP call with retry
-                    if (retryTimes > 0) {
-                        RecallEngineException lastException = null;
-                        for (int i = 0; i < retryTimes; i++) {
-                            try {
-                                doWrite(instId, tbl, request);
-                                lastException = null;
-                                break;
-                            } catch (RecallEngineException e) {
-                                lastException = e;
-                                logger.warn("Async write failed, retrying ({}/{}), err: {}", i + 1, retryTimes, e.getMessage());
-                            }
-                        }
-                        if (lastException != null) {
-                            throw lastException;
-                        }
-                    } else {
-                        doWrite(instId, tbl, request);
-                    }
-
-                    logger.debug("Async write completed: {} items to {}/{}", items.size(), instId, tbl);
-                } catch (Exception e) {
-                    logger.error("Async write failed for {}/{}: {}", instId, tbl, e.getMessage(), e);
-                }
-            }
-        });
-    }
-
-    /**
-     * Close client resources
+     * Flush whatever is buffered and stop accepting writes.
      */
     public void close() {
         this.running = false;
@@ -609,36 +476,20 @@ public class RecallEngineClient {
             writeLock.unlock();
         }
 
-        // Wait for async write thread to stop. No timeout here: the worker
-        // exits its loop as soon as it observes running=false, plus an upper
-        // bound of flushIntervalMs in await(); a hard 1s ceiling used to cut
-        // the worker off mid-flush and silently drop buffered records.
-        if (asyncWriteThread != null && asyncWriteThread.isAlive()) {
+        // The timer thread observes running=false within at most
+        // flushIntervalMs and flushes on its way out; no hard timeout here,
+        // because cutting it off mid-flush would drop buffered rows.
+        Thread thread = flushTimerThread;
+        if (thread != null && thread.isAlive()) {
             try {
-                asyncWriteThread.join();
+                thread.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
 
-        // Flush remaining data
+        // Anything the timer thread did not get to.
         writeFlush();
-
-        // Shutdown executor. Allow up to 15s for already-submitted HTTP
-        // batches (including their retries) to complete before forcing
-        // shutdownNow(); the previous 5s ceiling routinely interrupted
-        // in-flight requests on slow backends and lost data.
-        if (writeExecutor != null && !writeExecutor.isShutdown()) {
-            writeExecutor.shutdown();
-            try {
-                if (!writeExecutor.awaitTermination(15, TimeUnit.SECONDS)) {
-                    writeExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                writeExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
     }
 
     // ==================== Inner Class ====================

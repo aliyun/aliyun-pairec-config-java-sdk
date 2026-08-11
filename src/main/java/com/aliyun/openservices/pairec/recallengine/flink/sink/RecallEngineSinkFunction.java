@@ -41,10 +41,12 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
     private final int retryTimes;
     private final String authorization;
     private final InsertMode insertMode;
+    private final int batchSize;
+    private final long flushIntervalMs;
     private final List<RowType.RowField> fields;
-    
+
     private transient RecallEngineClient client;
-    
+
     public RecallEngineSinkFunction(
             String endpoint,
             String instanceId,
@@ -54,6 +56,8 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
             int retryTimes,
             String authorization,
             InsertMode insertMode,
+            int batchSize,
+            long flushIntervalMs,
             DataType dataType) {
         this.endpoint = endpoint;
         this.instanceId = instanceId;
@@ -63,16 +67,20 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
         this.retryTimes = retryTimes;
         this.authorization = authorization;
         this.insertMode = insertMode;
-        
+        this.batchSize = batchSize;
+        this.flushIntervalMs = flushIntervalMs;
+
         RowType rowType = (RowType) dataType.getLogicalType();
         this.fields = rowType.getFields();
     }
-    
+
     private void initializeClient() {
         if (this.client == null) {
             this.client = new RecallEngineClient(endpoint, username, password)
-                    .withRetryTimes(retryTimes);
-            
+                    .withRetryTimes(retryTimes)
+                    .withBatchSize(batchSize)
+                    .withFlushInterval(flushIntervalMs);
+
             if (authorization != null && !authorization.isEmpty()) {
                 this.client.withRequestHeader("Authorization", authorization);
             }
@@ -106,6 +114,11 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
             request.setInsertMode(insertMode);
 
             try {
+                // Blocks whenever the buffer has filled up and the batch is
+                // being sent, so a slow backend backpressures this task instead
+                // of piling rows up in memory. HTTP failures are retried and
+                // then logged inside the client, so what reaches this catch is
+                // an unexpected client-state error, not a backend hiccup.
                 client.write(instanceId, table, request);
             } catch (Exception e) {
                 LOG.error("Failed to write data to RecallEngine. instanceId: {}, table: {}, data: {}, error: {}",
@@ -154,7 +167,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
     @Override
     public void close() throws Exception {
         if (client != null) {
-            client.writeFlush();
+            // close() flushes whatever is still buffered before returning.
             client.close();
         }
         super.close();

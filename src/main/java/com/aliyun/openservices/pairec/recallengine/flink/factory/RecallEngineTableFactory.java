@@ -5,6 +5,7 @@ import com.aliyun.openservices.pairec.recallengine.flink.sink.RecallEngineDynami
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.FactoryUtil;
@@ -57,6 +58,16 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
             .defaultValue("insert")
             .withDescription("Write mode: 'insert' (default) or 'upsert'");
 
+    public static final ConfigOption<Integer> BATCH_SIZE = ConfigOptions.key("batch_size")
+            .intType()
+            .defaultValue(200)
+            .withDescription("Rows per write request; the sink flushes as soon as this many rows are buffered");
+
+    public static final ConfigOption<Long> FLUSH_INTERVAL_MS = ConfigOptions.key("flush_interval_ms")
+            .longType()
+            .defaultValue(50L)
+            .withDescription("Flush a partial batch after this many milliseconds");
+
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
         final FactoryUtil.TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(this, context);
@@ -76,13 +87,27 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
         }
 
         InsertMode insertMode = InsertMode.fromValue(options.get(INSERT_MODE));
+        // Validate here rather than letting the client reject these when the
+        // first record arrives: a bad value should fail job submission, not a
+        // running job.
+        final int batchSize = options.get(BATCH_SIZE);
+        if (batchSize <= 0) {
+            throw new ValidationException(
+                    String.format("'%s' must be positive, got %d", BATCH_SIZE.key(), batchSize));
+        }
+        final long flushIntervalMs = options.get(FLUSH_INTERVAL_MS);
+        if (flushIntervalMs <= 0) {
+            throw new ValidationException(
+                    String.format("'%s' must be positive, got %d", FLUSH_INTERVAL_MS.key(), flushIntervalMs));
+        }
 
         final DataType producedDataType =
                 context.getCatalogTable().getResolvedSchema().toPhysicalRowDataType();
 
         return new RecallEngineDynamicTableSink(
                 endpoint, instanceId, table, username, password,
-                retryTimes, authorization, insertMode, producedDataType);
+                retryTimes, authorization, insertMode, batchSize, flushIntervalMs,
+                producedDataType);
     }
     
     @Override
@@ -107,6 +132,8 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
         options.add(RETRY_TIMES);
         options.add(AUTHORIZATION);
         options.add(INSERT_MODE);
+        options.add(BATCH_SIZE);
+        options.add(FLUSH_INTERVAL_MS);
         return options;
     }
 }
