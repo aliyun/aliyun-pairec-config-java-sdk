@@ -5,7 +5,7 @@
   <artifactId>pairec-sdk</artifactId>
   <packaging>jar</packaging>
   <name>pairec-sdk</name>
-  <version>1.0.9</version>
+  <version>1.1.0</version>
   <url>>http://maven.apache.org</url>
   <description>SDK for PAI-REC config service</description>
   <scm>
@@ -89,7 +89,7 @@
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-gpg-plugin</artifactId>
-            <version>1.5</version>
+            <version>${gpg-plugin.version}</version>
             <executions>
               <execution>
                 <id>sign-artifacts</id>
@@ -322,7 +322,7 @@
     <junit-version>4.13.1</junit-version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <javadoc-plugin.version>3.2.0</javadoc-plugin.version>
-    <gpg-plugin.version>1.6</gpg-plugin.version>
+    <gpg-plugin.version>3.2.8</gpg-plugin.version>
     <jar-plugin.version>3.0.2</jar-plugin.version>
     <source-plugin.version>3.0.1</source-plugin.version>
   </properties>

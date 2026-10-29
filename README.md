@@ -7,7 +7,7 @@ Java sdk for PA-REC config server. Aliyun product [link](https://pairec.console.
 <dependency>
   <groupId>com.aliyun.openservices.aiservice</groupId>
   <artifactId>pairec-sdk</artifactId>
-  <version>1.0.9</version>
+  <version>1.1.0</version>
 </dependency>
 ```
 
@@ -65,7 +65,17 @@ public class ExperimentTest {
 }
 
 ```
+
+## 发布
+
+```bash
+mvn clean deploy -Dmaven.test.skip=true -P release
+```
+
 ## 版本说明
+1.1.0 (2026-10-29)
+* recall 请求参数与 Go SDK 对齐：RecallConf 支持 options（trigger_limit、timeout）、queries（显式查询向量）、version_id、user_embedding_version_id
+
 1.0.9 (2026-05-18)
 * 公网调用链路优化
 * recall engine delete api 支持
