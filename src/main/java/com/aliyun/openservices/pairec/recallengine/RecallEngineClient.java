@@ -17,6 +17,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * <ul>
  *   <li>recall: synchronous</li>
  *   <li>write: synchronous, buffered and batched</li>
+ *   <li>delete: synchronous</li>
  * </ul>
  *
  * <p>Rows handed to {@link #write} are buffered in memory. Once the buffer
@@ -403,6 +404,70 @@ public class RecallEngineClient {
         } catch (Exception e) {
             // No status code: transport or serialization failure, treated as retryable.
             throw new RecallEngineException("Write request failed", e);
+        }
+    }
+
+    /**
+     * Delete records by primary key synchronously.
+     */
+    public DeleteResponse delete(String instanceId, String table, DeleteRequest request)
+            throws RecallEngineException {
+        request.validate();
+        int maxAttempts = Math.max(1, retryTimes);
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return doDelete(instanceId, table, request);
+            } catch (RecallEngineException e) {
+                if (attempt >= maxAttempts || !isRetryable(e.getStatusCode())) {
+                    throw e;
+                }
+                logger.warn("delete failed for {}/{}, retrying ({}/{}), err: {}",
+                        instanceId, table, attempt, maxAttempts, e.getMessage());
+            }
+        }
+    }
+
+    private DeleteResponse doDelete(String instanceId, String table, DeleteRequest request)
+            throws RecallEngineException {
+        try {
+            String json = objectMapper.writeValueAsString(request);
+            String url = String.format("%s/api/v1/tables/%s/%s/%s/delete_records",
+                    endpoint, instanceId, request.getSchema(), table);
+            RequestBody body = RequestBody.create(json, JSON);
+            Request.Builder requestBuilder = new Request.Builder()
+                    .url(url)
+                    .post(body)
+                    .header("Content-Type", "application/json")
+                    .header("Auth", buildAuth());
+
+            for (Map.Entry<String, String> entry : requestHeaders.entrySet()) {
+                requestBuilder.header(entry.getKey(), entry.getValue());
+            }
+
+            try (okhttp3.Response response = httpClient.newCall(requestBuilder.build()).execute()) {
+                if (response.body() == null) {
+                    throw new RecallEngineException("Empty response body");
+                }
+                String responseBody = response.body().string();
+                if (response.code() != 200) {
+                    String errorMsg = "delete request failed, status: " + response.code();
+                    try {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> errorMap = objectMapper.readValue(responseBody, Map.class);
+                        if (errorMap.containsKey("message")) {
+                            errorMsg += ", message: " + errorMap.get("message");
+                        }
+                    } catch (Exception e) {
+                        logger.debug("Failed to parse error response", e);
+                    }
+                    throw new RecallEngineException(errorMsg, response.code());
+                }
+                return objectMapper.readValue(responseBody, DeleteResponse.class);
+            }
+        } catch (RecallEngineException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RecallEngineException("Delete request failed", e);
         }
     }
 

@@ -1,7 +1,10 @@
 package com.aliyun.openservices.pairec.recallengine.flink.sink;
 
+import com.aliyun.openservices.pairec.recallengine.DeleteRequest;
+import com.aliyun.openservices.pairec.recallengine.DeleteResponse;
 import com.aliyun.openservices.pairec.recallengine.InsertMode;
 import com.aliyun.openservices.pairec.recallengine.RecallEngineClient;
+import com.aliyun.openservices.pairec.recallengine.RecallEngineException;
 import com.aliyun.openservices.pairec.recallengine.WriteRequest;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.table.data.ArrayData;
@@ -25,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +48,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
     private final int batchSize;
     private final long flushIntervalMs;
     private final List<RowType.RowField> fields;
+    private final int deleteKeyIndex;
 
     private transient RecallEngineClient client;
 
@@ -59,6 +64,23 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
             int batchSize,
             long flushIntervalMs,
             DataType dataType) {
+        this(endpoint, instanceId, table, username, password, retryTimes, authorization,
+                insertMode, batchSize, flushIntervalMs, dataType, -1);
+    }
+
+    public RecallEngineSinkFunction(
+            String endpoint,
+            String instanceId,
+            String table,
+            String username,
+            String password,
+            int retryTimes,
+            String authorization,
+            InsertMode insertMode,
+            int batchSize,
+            long flushIntervalMs,
+            DataType dataType,
+            int deleteKeyIndex) {
         this.endpoint = endpoint;
         this.instanceId = instanceId;
         this.table = table;
@@ -72,6 +94,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
 
         RowType rowType = (RowType) dataType.getLogicalType();
         this.fields = rowType.getFields();
+        this.deleteKeyIndex = deleteKeyIndex;
     }
 
     private void initializeClient() {
@@ -124,6 +147,19 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
                 LOG.error("Failed to write data to RecallEngine. instanceId: {}, table: {}, data: {}, error: {}",
                         instanceId, table, data, e.getMessage(), e);
                 throw new RuntimeException("Failed to write data to RecallEngine", e);
+            }
+        } else if (value.getRowKind() == RowKind.DELETE && deleteKeyIndex >= 0) {
+            Object key = extractFieldValue(value, deleteKeyIndex, fields.get(deleteKeyIndex).getType());
+            if (key == null) {
+                throw new IllegalArgumentException(
+                        "Delete key must not be null: " + fields.get(deleteKeyIndex).getName());
+            }
+            client.writeFlush();
+            DeleteResponse response = client.delete(
+                    instanceId, table, new DeleteRequest(Collections.singletonList(key.toString())));
+            if (response == null || !"OK".equals(response.getCode())) {
+                throw new RecallEngineException("Delete request failed: "
+                        + (response == null ? "empty response" : response.getCode() + ": " + response.getMessage()));
             }
         }
     }
