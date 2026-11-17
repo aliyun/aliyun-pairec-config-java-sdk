@@ -65,6 +65,52 @@ public class ExperimentTest {
 }
 
 ```
+## Flink DELETE support
+
+Set `delete_key_field` to the physical column containing the RecallEngine primary key
+to enable native Flink `DELETE` handling. Supported key types are `STRING` / `VARCHAR`,
+`INT`, and `BIGINT`. The column must exist and its value must not be null.
+
+```sql
+CREATE TEMPORARY TABLE recall_sink (
+    item_id STRING NOT NULL,
+    score FLOAT
+) WITH (
+    'connector' = 'recallengine',
+    'endpoint' = 'http://<endpoint>',
+    'instance_id' = '<instance-id>',
+    'table' = '<table-name>',
+    'username' = '<username>',
+    'password' = '<password>',
+    'delete_key_field' = 'item_id'
+);
+
+-- The upstream table supplies native Flink changelog events.
+INSERT INTO recall_sink
+SELECT item_id, score FROM upstream_changelog;
+```
+
+`INSERT` and `UPDATE_AFTER` keep the existing write behavior. When `delete_key_field`
+is configured, `DELETE` flushes earlier buffered writes and synchronously calls the
+SDK delete API; delete failures are propagated to Flink. `UPDATE_BEFORE` is not a
+delete command. Without this option, the supported changelog remains unchanged.
+An ordinary business column named `op` is not interpreted by the connector.
+
+Deletion uses the existing target's `default` schema and default data version.
+For KV / Vector tables, it removes the record for the primary key. For KKV / Bloom
+tables, it removes the **entire primary-key group**, including all secondary keys.
+Only send group-level deletion events to the latter; deleting one SQL row does not
+necessarily mean deleting the whole group.
+
+Writes and deletes for the same backend key must arrive in order at the same sink
+subtask. A composite SQL primary key does not ensure routing by a KKV / Bloom group
+key. This option does not require a SQL primary-key declaration; Flink's planning
+and `NOT NULL` constraints still apply, including to DELETE rows.
+
+The flush-before-delete sequence orders requests within one subtask. Existing write
+failure handling and checkpoint behavior are unchanged: failed write batches may be
+logged and dropped, and this change adds no delivery or global ordering guarantee.
+
 ## 打包
 
 ```shell

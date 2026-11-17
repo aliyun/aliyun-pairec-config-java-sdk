@@ -10,6 +10,7 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.RowType;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -58,6 +59,11 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
             .defaultValue("insert")
             .withDescription("Write mode: 'insert' (default) or 'upsert'");
 
+    public static final ConfigOption<String> DELETE_KEY_FIELD = ConfigOptions.key("delete_key_field")
+            .stringType()
+            .noDefaultValue()
+            .withDescription("Physical column containing the backend primary key; enables DELETE handling");
+
     public static final ConfigOption<Integer> BATCH_SIZE = ConfigOptions.key("batch_size")
             .intType()
             .defaultValue(200)
@@ -103,11 +109,30 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
 
         final DataType producedDataType =
                 context.getCatalogTable().getResolvedSchema().toPhysicalRowDataType();
+        final String deleteKeyField = options.getOptional(DELETE_KEY_FIELD).orElse(null);
+        int deleteKeyIndex = -1;
+        if (deleteKeyField != null) {
+            RowType rowType = (RowType) producedDataType.getLogicalType();
+            deleteKeyIndex = rowType.getFieldNames().indexOf(deleteKeyField);
+            if (deleteKeyIndex < 0) {
+                throw new ValidationException(
+                        "'delete_key_field' must reference a physical column: " + deleteKeyField);
+            }
+            switch (rowType.getTypeAt(deleteKeyIndex).getTypeRoot()) {
+                case VARCHAR:
+                case INTEGER:
+                case BIGINT:
+                    break;
+                default:
+                    throw new ValidationException(
+                            "'delete_key_field' must be STRING, VARCHAR, INT or BIGINT: " + deleteKeyField);
+            }
+        }
 
         return new RecallEngineDynamicTableSink(
                 endpoint, instanceId, table, username, password,
                 retryTimes, authorization, insertMode, batchSize, flushIntervalMs,
-                producedDataType);
+                producedDataType, deleteKeyIndex);
     }
     
     @Override
@@ -132,6 +157,7 @@ public class RecallEngineTableFactory implements DynamicTableSinkFactory {
         options.add(RETRY_TIMES);
         options.add(AUTHORIZATION);
         options.add(INSERT_MODE);
+        options.add(DELETE_KEY_FIELD);
         options.add(BATCH_SIZE);
         options.add(FLUSH_INTERVAL_MS);
         return options;
