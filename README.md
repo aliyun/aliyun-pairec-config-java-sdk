@@ -76,7 +76,7 @@ DeleteKeyPairsRequest request = new DeleteKeyPairsRequest(
 client.deleteKeyPairs(instanceId, "x2i_edges", request);
 ```
 
-默认使用 `default` schema。HTTP 成功表示请求已受理，消费完成后可查询删除结果。同一成员先异步写入再删除时，请使用带回调的 `write`。等该成员所有已提交的写请求都收到回调，并确认每个响应都非空且 `code` 为 `OK` 后，再发删除。`writeFlush()` 可能在已经提交的异步写完成前返回。
+默认使用 `default` schema。HTTP 成功表示请求已受理，消费完成后可查询删除结果。同一成员先异步写入再删除时，给每次 `write` 传入独立的回调对象。等涉及该成员的所有写入都完成，且每个回调的响应都非空、`code` 都为 `OK` 后，再发删除。复用同一个回调对象时，SDK 可能把多次写入合并为一个批次，只回调一次。`writeFlush()` 可能在已经提交的异步写完成前返回。
 
 ## 发布
 
