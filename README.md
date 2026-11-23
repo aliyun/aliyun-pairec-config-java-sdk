@@ -66,6 +66,18 @@ public class ExperimentTest {
 
 ```
 
+## 删除 KKV 成员
+
+在 v2 KKV 表中，`deleteKeyPairs` 按 `(pkey, skey)` 删除指定成员。下面的请求删除 `u1` 下的 `A`，保留同组的其他成员。需要清空整组时，使用原有的 `delete` 接口并传入主键列表。
+
+```java
+DeleteKeyPairsRequest request = new DeleteKeyPairsRequest(
+        java.util.Collections.singletonList(new DeleteKeyPairsRequest.KeyPair("u1", "A")));
+client.deleteKeyPairs(instanceId, "x2i_edges", request);
+```
+
+默认使用 `default` schema。HTTP 成功表示请求已受理，消费完成后可查询删除结果。
+
 ## 发布
 
 ```bash
