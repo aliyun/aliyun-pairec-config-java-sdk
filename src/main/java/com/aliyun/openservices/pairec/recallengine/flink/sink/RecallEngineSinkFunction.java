@@ -1,12 +1,12 @@
 package com.aliyun.openservices.pairec.recallengine.flink.sink;
 
-import com.aliyun.openservices.pairec.recallengine.DeleteRequest;
-import com.aliyun.openservices.pairec.recallengine.DeleteResponse;
+import com.aliyun.openservices.pairec.recallengine.FlinkSinkClient;
 import com.aliyun.openservices.pairec.recallengine.InsertMode;
-import com.aliyun.openservices.pairec.recallengine.RecallEngineClient;
-import com.aliyun.openservices.pairec.recallengine.RecallEngineException;
 import com.aliyun.openservices.pairec.recallengine.WriteRequest;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
+import org.apache.flink.runtime.state.FunctionInitializationContext;
+import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
@@ -28,12 +28,13 @@ import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
-public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
+public class RecallEngineSinkFunction extends RichSinkFunction<RowData> implements CheckpointedFunction {
     
     private static final Logger LOG = LoggerFactory.getLogger(RecallEngineSinkFunction.class);
     
@@ -49,8 +50,9 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
     private final long flushIntervalMs;
     private final List<RowType.RowField> fields;
     private final int deleteKeyIndex;
+    private final int deleteSkeyIndex;
 
-    private transient RecallEngineClient client;
+    private transient FlinkSinkClient client;
 
     public RecallEngineSinkFunction(
             String endpoint,
@@ -81,6 +83,23 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
             long flushIntervalMs,
             DataType dataType,
             int deleteKeyIndex) {
+        this(endpoint, instanceId, table, username, password, retryTimes, authorization,
+                insertMode, batchSize, flushIntervalMs, dataType, deleteKeyIndex, -1);
+    }
+
+    public RecallEngineSinkFunction(
+            String endpoint,
+            String instanceId,
+            String table,
+            String username,
+            String password,
+            int retryTimes,
+            String authorization,
+            InsertMode insertMode,
+            int batchSize,
+            long flushIntervalMs,
+            DataType dataType,
+            int deleteKeyIndex, int deleteSkeyIndex) {
         this.endpoint = endpoint;
         this.instanceId = instanceId;
         this.table = table;
@@ -95,15 +114,19 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
         RowType rowType = (RowType) dataType.getLogicalType();
         this.fields = rowType.getFields();
         this.deleteKeyIndex = deleteKeyIndex;
+        this.deleteSkeyIndex = deleteSkeyIndex;
     }
 
     private void initializeClient() {
         if (this.client == null) {
-            this.client = new RecallEngineClient(endpoint, username, password)
-                    .withRetryTimes(retryTimes)
-                    .withBatchSize(batchSize)
-                    .withFlushInterval(flushIntervalMs);
+            this.client = new FlinkSinkClient(endpoint, username, password, retryTimes, deleteSkeyIndex >= 0);
+            client.withBatchSize(batchSize).withFlushInterval(flushIntervalMs);
 
+            if (deleteSkeyIndex >= 0) {
+                String alias = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                        fields.get(deleteSkeyIndex).getName().getBytes(StandardCharsets.UTF_8));
+                client.withRequestHeader("X-RecallEngine-Delete-Skey", alias);
+            }
             if (authorization != null && !authorization.isEmpty()) {
                 this.client.withRequestHeader("Authorization", authorization);
             }
@@ -155,11 +178,14 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
                         "Delete key must not be null: " + fields.get(deleteKeyIndex).getName());
             }
             client.writeFlush();
-            DeleteResponse response = client.delete(
-                    instanceId, table, new DeleteRequest(Collections.singletonList(key.toString())));
-            if (response == null || !"OK".equals(response.getCode())) {
-                throw new RecallEngineException("Delete request failed: "
-                        + (response == null ? "empty response" : response.getCode() + ": " + response.getMessage()));
+            if (deleteSkeyIndex >= 0) {
+                Object skey = extractFieldValue(value, deleteSkeyIndex, fields.get(deleteSkeyIndex).getType());
+                if (skey == null || skey.toString().isEmpty() || key.toString().isEmpty()) {
+                    throw new IllegalArgumentException("Both pkey and skey are required");
+                }
+                client.deleteMember(instanceId, table, key.toString(), skey.toString());
+            } else {
+                client.deleteGroup(instanceId, table, key.toString());
             }
         }
     }
@@ -200,6 +226,18 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> {
         }
     }
     
+    @Override
+    public void snapshotState(FunctionSnapshotContext context) {
+        if (deleteSkeyIndex >= 0 && client != null) {
+            client.writeFlush();
+        }
+    }
+
+    @Override
+    public void initializeState(FunctionInitializationContext context) {
+        // Pending writes are flushed before acknowledging a checkpoint.
+    }
+
     @Override
     public void close() throws Exception {
         if (client != null) {
