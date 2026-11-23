@@ -441,7 +441,11 @@ public class RecallEngineClient {
         return delete(instanceId, table, request.getSchema(), "delete_records", request);
     }
 
-    /** Synchronously delete individual (primary key, secondary key) pairs from a v2 KKV table. */
+    /**
+     * Synchronously submit a member delete for a v2 KKV table.
+     * When ordering matters, wait for the preceding async write's success callback before deleting.
+     * {@link #writeFlush()} can return while a previously submitted write is still in flight.
+     */
     public DeleteResponse deleteKeyPairs(String instanceId, String table, DeleteKeyPairsRequest request) throws RecallEngineException {
         validatePublicEndpointConfig();
         if (request == null) {
