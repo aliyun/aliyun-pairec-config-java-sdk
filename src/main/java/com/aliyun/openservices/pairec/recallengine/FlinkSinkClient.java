@@ -1,6 +1,7 @@
 package com.aliyun.openservices.pairec.recallengine;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.ConnectionPool;
 import okhttp3.HttpUrl;
@@ -111,16 +112,7 @@ public final class FlinkSinkClient extends RecallEngineClient {
         Response result = withRetry(() -> {
             try (okhttp3.Response response = http.newCall(post).execute()) {
                 if (!response.isSuccessful()) {
-                    String message = "Delete request failed: HTTP " + response.code();
-                    try {
-                        JsonNode body = mapper.readTree(response.peekBody(4096).byteStream());
-                        if (body != null && body.path("message").isTextual()) {
-                            message += ", " + body.get("message").textValue();
-                        }
-                    } catch (IOException e) {
-                        logger.debug("Could not read delete error details", e);
-                    }
-                    throw new RecallEngineException(message, response.code());
+                    throw deleteError(response);
                 }
                 return response.body() == null ? null : mapper.readValue(response.body().byteStream(), Response.class);
             } catch (IOException e) {
@@ -130,6 +122,29 @@ public final class FlinkSinkClient extends RecallEngineClient {
         if (result == null || !"OK".equals(result.getCode())) {
             throw new RecallEngineException(result == null ? "Empty delete response" : result.getMessage());
         }
+    }
+
+    private RecallEngineException deleteError(okhttp3.Response response) {
+        String message = "Delete request failed: HTTP " + response.code();
+        if (response.body() != null) {
+            try (JsonParser parser = mapper.getFactory().createParser(response.body().byteStream())) {
+                if (parser.nextToken() == JsonToken.START_OBJECT) {
+                    String field;
+                    while ((field = parser.nextFieldName()) != null) {
+                        JsonToken value = parser.nextToken();
+                        if ("message".equals(field) && value == JsonToken.VALUE_STRING) {
+                            String reason = parser.getText();
+                            message += ", " + reason.substring(0, Math.min(reason.length(), 4096));
+                            break;
+                        }
+                        parser.skipChildren();
+                    }
+                }
+            } catch (IOException e) {
+                logger.debug("Could not read delete error details", e);
+            }
+        }
+        return new RecallEngineException(message, response.code());
     }
 
     private interface Operation<T> {
