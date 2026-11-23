@@ -443,7 +443,8 @@ public class RecallEngineClient {
 
     /**
      * Synchronously submit a member delete for a v2 KKV table.
-     * When ordering matters, wait for the preceding async write's success callback before deleting.
+     * Before deleting, wait for all outstanding writes to the affected members to complete.
+     * Verify each callback received a non-null response with code OK.
      * {@link #writeFlush()} can return while a previously submitted write is still in flight.
      */
     public DeleteResponse deleteKeyPairs(String instanceId, String table, DeleteKeyPairsRequest request) throws RecallEngineException {
