@@ -112,9 +112,8 @@ key. This option does not require a SQL primary-key declaration; Flink's plannin
 and `NOT NULL` constraints still apply, including to DELETE rows.
 
 The sink flushes earlier buffered writes before sending a delete from the same
-subtask. In KKV member mode it also flushes at checkpoints and propagates a
-failed write batch to Flink. In single-key mode a failed write batch may still be
-logged and dropped. HTTP acceptance precedes asynchronous consumption.
+subtask. Both delete modes also flush at checkpoints and propagate a failed
+write batch to Flink. HTTP acceptance precedes asynchronous consumption.
 
 ## 打包
 

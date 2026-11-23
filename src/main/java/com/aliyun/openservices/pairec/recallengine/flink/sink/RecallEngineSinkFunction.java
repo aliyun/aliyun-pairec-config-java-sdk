@@ -119,7 +119,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> implemen
 
     private void initializeClient() {
         if (this.client == null) {
-            this.client = new FlinkSinkClient(endpoint, username, password, retryTimes, deleteSkeyIndex >= 0);
+            this.client = new FlinkSinkClient(endpoint, username, password, retryTimes, deleteKeyIndex >= 0);
             client.withBatchSize(batchSize).withFlushInterval(flushIntervalMs);
 
             if (deleteSkeyIndex >= 0) {
@@ -228,7 +228,7 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> implemen
     
     @Override
     public void snapshotState(FunctionSnapshotContext context) {
-        if (deleteSkeyIndex >= 0 && client != null) {
+        if (deleteKeyIndex >= 0 && client != null) {
             client.writeFlush();
         }
     }

@@ -1,5 +1,6 @@
 package com.aliyun.openservices.pairec.recallengine;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.ConnectionPool;
 import okhttp3.HttpUrl;
@@ -43,7 +44,7 @@ public final class FlinkSinkClient extends RecallEngineClient {
                 .connectionPool(new ConnectionPool(1000, 5, TimeUnit.MINUTES))
                 .build();
         withHttpClient(http);
-        // In member mode the adapter records the failure after the final attempt.
+        // A delete-enabled sink records the failure after the final HTTP attempt.
         withRetryTimes(strictWrites ? 1 : retryTimes);
     }
 
@@ -54,13 +55,11 @@ public final class FlinkSinkClient extends RecallEngineClient {
         }
         checkWriteFailure();
         try {
-            return withRetry(() -> {
-                WriteResponse response = super.doWrite(instanceId, table, request);
-                if (response == null || !"OK".equals(response.getCode())) {
-                    throw new RecallEngineException(response == null ? "Empty write response" : response.getMessage());
-                }
-                return response;
-            });
+            WriteResponse response = withRetry(() -> super.doWrite(instanceId, table, request));
+            if (response == null || !"OK".equals(response.getCode())) {
+                throw new RecallEngineException(response == null ? "Empty write response" : response.getMessage());
+            }
+            return response;
         } catch (RecallEngineException e) {
             writeFailure = new IllegalStateException("Buffered write failed", e);
             throw e;
@@ -112,7 +111,16 @@ public final class FlinkSinkClient extends RecallEngineClient {
         Response result = withRetry(() -> {
             try (okhttp3.Response response = http.newCall(post).execute()) {
                 if (!response.isSuccessful()) {
-                    throw new RecallEngineException("Delete request failed: HTTP " + response.code(), response.code());
+                    String message = "Delete request failed: HTTP " + response.code();
+                    try {
+                        JsonNode body = mapper.readTree(response.peekBody(4096).byteStream());
+                        if (body != null && body.path("message").isTextual()) {
+                            message += ", " + body.get("message").textValue();
+                        }
+                    } catch (IOException e) {
+                        logger.debug("Could not read delete error details", e);
+                    }
+                    throw new RecallEngineException(message, response.code());
                 }
                 return response.body() == null ? null : mapper.readValue(response.body().byteStream(), Response.class);
             } catch (IOException e) {
