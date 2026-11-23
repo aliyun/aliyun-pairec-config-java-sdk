@@ -444,7 +444,8 @@ public class RecallEngineClient {
     /**
      * Synchronously submit a member delete for a v2 KKV table.
      * To track individual writes, pass a distinct callback to each write; batched writes can share one callback.
-     * Before deleting, wait for all outstanding writes to the affected members and check for non-null OK responses.
+     * Use a bounded wait for all outstanding writes to the affected members. Only delete after every expected
+     * completion reports a non-null OK response. Abort this delete on timeout or write failure.
      * {@link #writeFlush()} can return while a previously submitted write is still in flight.
      */
     public DeleteResponse deleteKeyPairs(String instanceId, String table, DeleteKeyPairsRequest request) throws RecallEngineException {
