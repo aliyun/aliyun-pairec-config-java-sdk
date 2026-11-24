@@ -69,7 +69,6 @@ public class ExperimentTest {
 
 For v2 KKV tables, configure both `delete_key_field` and `delete_skey_field`
 to delete one member. Configure only `delete_key_field` to delete the entire group.
-See the [Flink SQL guide with CDC examples (中文)](docs/flink-kkv-delete.md).
 
 Set `delete_key_field` to the physical column containing the RecallEngine primary key
 to enable native Flink `DELETE` handling. Supported key types are `STRING` / `VARCHAR`,
