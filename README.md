@@ -66,6 +66,18 @@ public class ExperimentTest {
 
 ```
 
+## 删除 KKV 成员
+
+在 v2 KKV 表中，`deleteKeyPairs` 按 `(pkey, skey)` 删除指定成员。下面的请求删除 `u1` 下的 `A`，保留同组的其他成员。需要清空整组时，使用原有的 `delete` 接口并传入主键列表。
+
+```java
+DeleteKeyPairsRequest request = new DeleteKeyPairsRequest(
+        java.util.Collections.singletonList(new DeleteKeyPairsRequest.KeyPair("u1", "A")));
+client.deleteKeyPairs(instanceId, "x2i_edges", request);
+```
+
+默认使用 `default` schema。HTTP 成功表示请求已受理，消费完成后可查询删除结果。同一成员先异步写入再删除时，给每次 `write` 传入独立的回调对象。等涉及该成员的所有写入都完成，且每个回调的响应都非空、`code` 都为 `OK` 后，再发删除。为等待设置超时。超时仍缺少回调，或有写入失败时，中止本次删除。复用同一个回调对象时，SDK 可能把多次写入合并为一个批次，只回调一次。`writeFlush()` 可能在已经提交的异步写完成前返回。
+
 ## 发布
 
 ```bash

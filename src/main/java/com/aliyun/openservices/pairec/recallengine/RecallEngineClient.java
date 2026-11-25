@@ -438,25 +438,42 @@ public class RecallEngineClient {
         validatePublicEndpointConfig();
         request.validate();
 
-        if (retryTimes > 0) {
-            RecallEngineException lastException = null;
-            for (int i = 0; i < retryTimes; i++) {
-                try {
-                    return doDelete(instanceId, table, request);
-                } catch (RecallEngineException e) {
-                    lastException = e;
-                    logger.warn("recallengine: delete failed, retrying..., err: {}", e.getMessage());
-                }
-            }
-            throw lastException;
-        } else {
-            return doDelete(instanceId, table, request);
-        }
+        return delete(instanceId, table, request.getSchema(), "delete_records", request);
     }
 
-    private DeleteResponse doDelete(String instanceId, String table, DeleteRequest request) throws RecallEngineException {
-        String url = String.format("%s/api/v1/tables/%s/%s/%s/delete_records", endpoint, instanceId, request.getSchema(), table);
-        return doPost(url, request, "delete", DeleteResponse.class);
+    /**
+     * Synchronously submit a member delete for a v2 KKV table.
+     * To track individual writes, pass a distinct callback to each write; batched writes can share one callback.
+     * Use a bounded wait for all outstanding writes to the affected members. Only delete after every expected
+     * completion reports a non-null OK response. Abort this delete on timeout or write failure.
+     * {@link #writeFlush()} can return while a previously submitted write is still in flight.
+     */
+    public DeleteResponse deleteKeyPairs(String instanceId, String table, DeleteKeyPairsRequest request) throws RecallEngineException {
+        validatePublicEndpointConfig();
+        if (request == null) {
+            throw new IllegalArgumentException("Missing key-pair request");
+        }
+        request.validate();
+        DeleteResponse response = delete(instanceId, table, request.getSchema(), "delete_key_pairs", request);
+        if (response == null || !"OK".equals(response.getCode())) {
+            throw new RecallEngineException(response == null ? "Empty delete response" : response.getMessage());
+        }
+        return response;
+    }
+
+    private DeleteResponse delete(String instanceId, String table, String schema, String action, Object request) throws RecallEngineException {
+        String url = String.format("%s/api/v1/tables/%s/%s/%s/%s", endpoint, instanceId, schema, table, action);
+        int attempts = Math.max(1, retryTimes);
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return doPost(url, request, "delete", DeleteResponse.class);
+            } catch (RecallEngineException e) {
+                if (attempt >= attempts) {
+                    throw e;
+                }
+                logger.warn("recallengine: delete failed, retrying..., err: {}", e.getMessage());
+            }
+        }
     }
 
     /**
