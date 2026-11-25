@@ -72,7 +72,8 @@ to delete one member. Configure only `delete_key_field` to delete the entire gro
 
 Set `delete_key_field` to the physical column containing the RecallEngine primary key
 to enable native Flink `DELETE` handling. Supported key types are `STRING` / `VARCHAR`,
-`INT`, and `BIGINT`. The column must exist and its value must not be null.
+`INT`, and `BIGINT`. Each configured key column must exist and have a non-null
+value on the `DELETE` row. String keys must also be non-empty.
 
 ```sql
 CREATE TEMPORARY TABLE recall_sink (

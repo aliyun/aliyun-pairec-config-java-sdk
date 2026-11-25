@@ -173,14 +173,14 @@ public class RecallEngineSinkFunction extends RichSinkFunction<RowData> implemen
             }
         } else if (value.getRowKind() == RowKind.DELETE && deleteKeyIndex >= 0) {
             Object key = extractFieldValue(value, deleteKeyIndex, fields.get(deleteKeyIndex).getType());
-            if (key == null) {
+            if (key == null || key.toString().isEmpty()) {
                 throw new IllegalArgumentException(
-                        "Delete key must not be null: " + fields.get(deleteKeyIndex).getName());
+                        "Delete key must not be null or empty: " + fields.get(deleteKeyIndex).getName());
             }
             client.writeFlush();
             if (deleteSkeyIndex >= 0) {
                 Object skey = extractFieldValue(value, deleteSkeyIndex, fields.get(deleteSkeyIndex).getType());
-                if (skey == null || skey.toString().isEmpty() || key.toString().isEmpty()) {
+                if (skey == null || skey.toString().isEmpty()) {
                     throw new IllegalArgumentException("Both pkey and skey are required");
                 }
                 client.deleteMember(instanceId, table, key.toString(), skey.toString());
