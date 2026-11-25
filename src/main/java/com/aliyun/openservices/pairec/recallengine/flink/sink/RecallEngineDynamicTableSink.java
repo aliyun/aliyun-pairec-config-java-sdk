@@ -21,6 +21,8 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
     private final int batchSize;
     private final long flushIntervalMs;
     private final DataType dataType;
+    private final int deleteKeyIndex;
+    private final int deleteSkeyIndex;
 
     public RecallEngineDynamicTableSink(
             String endpoint,
@@ -34,6 +36,40 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
             int batchSize,
             long flushIntervalMs,
             DataType dataType) {
+        this(endpoint, instanceId, table, username, password, retryTimes, authorization,
+                insertMode, batchSize, flushIntervalMs, dataType, -1);
+    }
+
+    public RecallEngineDynamicTableSink(
+            String endpoint,
+            String instanceId,
+            String table,
+            String username,
+            String password,
+            int retryTimes,
+            String authorization,
+            InsertMode insertMode,
+            int batchSize,
+            long flushIntervalMs,
+            DataType dataType,
+            int deleteKeyIndex) {
+        this(endpoint, instanceId, table, username, password, retryTimes, authorization,
+                insertMode, batchSize, flushIntervalMs, dataType, deleteKeyIndex, -1);
+    }
+
+    public RecallEngineDynamicTableSink(
+            String endpoint,
+            String instanceId,
+            String table,
+            String username,
+            String password,
+            int retryTimes,
+            String authorization,
+            InsertMode insertMode,
+            int batchSize,
+            long flushIntervalMs,
+            DataType dataType,
+            int deleteKeyIndex, int deleteSkeyIndex) {
         this.endpoint = endpoint;
         this.instanceId = instanceId;
         this.table = table;
@@ -45,21 +81,26 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
         this.batchSize = batchSize;
         this.flushIntervalMs = flushIntervalMs;
         this.dataType = dataType;
+        this.deleteKeyIndex = deleteKeyIndex;
+        this.deleteSkeyIndex = deleteSkeyIndex;
     }
     
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
-        return ChangelogMode.newBuilder()
+        ChangelogMode.Builder builder = ChangelogMode.newBuilder()
                 .addContainedKind(RowKind.INSERT)
-                .addContainedKind(RowKind.UPDATE_AFTER)
-                .build();
+                .addContainedKind(RowKind.UPDATE_AFTER);
+        if (deleteKeyIndex >= 0) {
+            builder.addContainedKind(RowKind.DELETE);
+        }
+        return builder.build();
     }
     
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
         RecallEngineSinkFunction sinkFunction = new RecallEngineSinkFunction(
                 endpoint, instanceId, table, username, password,
-                retryTimes, authorization, insertMode, batchSize, flushIntervalMs, dataType);
+                retryTimes, authorization, insertMode, batchSize, flushIntervalMs, dataType, deleteKeyIndex, deleteSkeyIndex);
         return SinkFunctionProvider.of(sinkFunction);
     }
 
@@ -67,7 +108,7 @@ public class RecallEngineDynamicTableSink implements DynamicTableSink {
     public DynamicTableSink copy() {
         return new RecallEngineDynamicTableSink(
                 endpoint, instanceId, table, username, password,
-                retryTimes, authorization, insertMode, batchSize, flushIntervalMs, dataType);
+                retryTimes, authorization, insertMode, batchSize, flushIntervalMs, dataType, deleteKeyIndex, deleteSkeyIndex);
     }
     
     @Override
